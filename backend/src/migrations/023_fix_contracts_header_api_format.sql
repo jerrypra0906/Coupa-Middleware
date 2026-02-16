@@ -1,0 +1,36 @@
+-- Migration 023: Fix Contracts Header API format to Coupa
+-- 
+-- This migration documents the code changes made to fix the API Contracts header integration:
+-- 1. Fixed request body format to ensure 'id' is sent as a number (not string)
+-- 2. Fixed Accept header to be exactly 'application/json' (not axios default)
+-- 3. Enhanced error logging for better debugging
+-- 4. Token caching already implemented - only refreshes when expired
+--
+-- Code changes:
+-- - backend/src/integrations/contracts/contractsHeaderToCoupa.js
+--   * Ensured contractId is converted to number before sending
+--   * Added validation to ensure id is numeric
+--   * Enhanced logging for debugging
+--
+-- - backend/src/config/coupa.js
+--   * Fixed Accept header in request interceptor to match example exactly
+--   * Enhanced error logging for PUT requests
+--
+-- No database schema changes required - this is a code-only fix.
+-- The API request format now matches the example:
+-- {
+--   "id": 232,  // number, not string
+--   "custom-fields": {
+--     "sap-oa": "1234567891011"
+--   },
+--   "status": "published"
+-- }
+--
+-- Headers:
+-- Accept: application/json
+-- Content-Type: application/json
+-- Authorization: Bearer {token}
+
+-- This is a documentation-only migration (no SQL changes needed)
+SELECT 'Migration 023: Contracts Header API format fix - Code changes only, no DB changes' AS migration_note;
+

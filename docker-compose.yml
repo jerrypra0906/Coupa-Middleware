@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: coupa_db
+    environment:
+      POSTGRES_DB: coupa_middleware_staging
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5434:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+    container_name: coupa_backend
+    environment:
+      NODE_ENV: production
+      PORT: 6001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: coupa_middleware_staging
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres123
+      DB_SSL_MODE: disable
+      SAP_BASE_URL: ${SAP_BASE_URL:-https://sap-instance.com}
+      SAP_CLIENT: ${SAP_CLIENT:-100}
+      SAP_USER: ${SAP_USER:-your_sap_user}
+      SAP_PASSWORD: ${SAP_PASSWORD:-your_sap_password}
+      SAP_LANGUAGE: ${SAP_LANGUAGE:-EN}
+      SAP_ODATA_ENDPOINT: ${SAP_ODATA_ENDPOINT:-/sap/opu/odata/SAP/Z_EXCHRATES_SRV/ExchangeRateSet}
+      COUPA_API_BASE_URL: ${COUPA_API_BASE_URL:-https://api.coupa.com}
+      COUPA_API_KEY: ${COUPA_API_KEY:-changeme}
+      COUPA_COMPANY_ID: ${COUPA_COMPANY_ID:-company}
+      # Coupa OAuth2 Configuration
+      COUPA_OAUTH_TOKEN_URL: ${COUPA_OAUTH_TOKEN_URL:-https://kpn-test.coupahost.com/oauth2/token}
+      COUPA_OAUTH_API_BASE_URL: ${COUPA_OAUTH_API_BASE_URL:-https://kpn-test.coupahost.com}
+      COUPA_OAUTH_CLIENT_ID: ${COUPA_OAUTH_CLIENT_ID:-7d1c663c96949dbf75b1a88d4730a5a7}
+      COUPA_OAUTH_CLIENT_SECRET: ${COUPA_OAUTH_CLIENT_SECRET:-672cbb548968b0c2c66ee16b368d2fc6beb2a7a4f7895e04c829aee0e825f12d}
+      COUPA_OAUTH_SCOPE: ${COUPA_OAUTH_SCOPE:-core.accounting.read core.accounting.write core.address.read_write core.approval.configuration.read core.approval.configuration.write core.approval.read core.approval.write core.budget.read core.budget.write core.business_entity.read core.business_entity.write core.business_groups.read_write core.catalog.read core.catalog.write core.commodity.read core.common.read core.common.write core.contract_party_role.read core.contract_party_role.write core.contract.read core.contract.write core.contracts_template.read core.contracts_template.write core.custom_objects.read_write core.data_table_view.write core.data_tables.read core.easy_form_response.approval.write core.easy_form_response.read core.easy_form_response.write core.easy_form.read core.easy_form.write core.estimated_tax.read core.estimated_tax.write core.expense.read core.expense.secure.read core.expense.secure.write core.expense.write core.financial_counterparty.read core.financial_counterparty.write core.global_navigation.read core.globalization.read core.integration.read core.integration.write core.inventory.adjustment.read core.inventory.adjustment.write core.inventory.asn.read core.inventory.asn.write core.inventory.balance.read core.inventory.common.read core.inventory.common.write core.inventory.consumption.read core.inventory.consumption.write core.inventory.cycle_counts.read core.inventory.cycle_counts.write core.inventory.pick_list.read core.inventory.pick_list.write core.inventory.receiving.read core.inventory.receiving.write core.inventory.return_to_supplier.read core.inventory.return_to_supplier.write core.inventory.transaction.read core.inventory.transfer.read core.inventory.transfer.write core.invoice.approval.bypass core.invoice.approval.write core.invoice.assignment.read core.invoice.assignment.write core.invoice.create core.invoice.delete core.invoice.read core.invoice.write core.item.read core.item.write core.items.flexible_attributes.read core.items.flexible_attributes.write core.legal_entity.read core.legal_entity.write core.lookups.read_write core.my_workbench.task.read core.notifications_summary.read core.notifications_summary.write core.object_translations.read core.object_translations.write core.order_header_confirmation.assignment.read core.order_header_confirmation.assignment.write core.order_header_confirmations.read core.order_header_confirmations.write core.order_pad.read core.order_pad.write core.pay.charges.read core.pay.charges.write core.pay.payment_accounts.read core.pay.payments.read core.pay.payments.write core.pay.statements.read core.pay.statements.write core.pay.virtual_cards.read core.pay.virtual_cards.write core.payables.allocations.read core.payables.allocations.write core.payables.expense.read core.payables.expense.write core.payables.external.read core.payables.external.write core.payables.invoice.read core.payables.invoice.write core.payables.order.read core.payables.order.write core.project.read core.project.write core.punchout_site.read core.punchout_site.write core.purchase_order_change.assignment.read core.purchase_order_change.assignment.write core.purchase_order_change.read core.purchase_order_change.write core.purchase_order_only.read core.purchase_order_only.write core.purchase_order.assignment.read core.purchase_order.assignment.write core.purchase_order.read core.purchase_order.write core.requisition.assignment.read core.requisition.assignment.write core.requisition.read core.requisition.write core.roles.read_write core.sourcing.bom.read core.sourcing.pending_supplier.read core.sourcing.pending_supplier.write core.sourcing.read core.sourcing.response.award.write core.sourcing.response.read core.sourcing.response.write core.sourcing.write core.supplier_information_sites.read core.supplier_information_sites.write core.supplier_information_tax_registrations.delete core.supplier_information_tax_registrations.read core.supplier_information_tax_registrations.write core.supplier_sharing_settings.read core.supplier_sharing_settings.write core.supplier_sites.read core.supplier_sites.write core.supplier.read core.supplier.risk_aware.read core.supplier.risk_aware.write core.supplier.write core.swap.write core.translation.read core.translation.write core.unmanaged_spend.read core.uom.read core.uom.write core.user_group.read core.user_group.write core.user_recent_activity.read core.user.read core.user.write core.webhooks.read core.webhooks.write core.write_a_request.read email login offline_access openid profile quality_collaboration.quality_inspection.read quality_collaboration.quality_inspection.write}
+      # SFTP configuration (match backend/.env.staging)
+      SFTP_HOST: fileshare-sg-test.coupahost.com
+      SFTP_PORT: 22
+      SFTP_USERNAME: kpn-test
+      SFTP_PASSWORD: pxvsMAg56u
+      SFTP_INCOMING_PATH: /Outgoing/Contract
+      SFTP_OUTGOING_PATH: /Incoming
+      SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-TLS}
+      SMTP_USER: ${SMTP_USER:-smtp_user}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-smtp_password}
+      SMTP_FROM: ${SMTP_FROM:-noreply@coupa-middleware.com}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4005}
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret}
+      SESSION_SECRET: ${SESSION_SECRET:-dev_session_secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key}
+      LOG_LEVEL: info
+    depends_on:
+      - db
+    ports:
+      - "6001:6001"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_BASE_URL: http://localhost:6001/api
+    container_name: coupa_frontend
+    ports:
+      - "4005:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+
+
