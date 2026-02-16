@@ -38,9 +38,16 @@ class CoupaClient {
     // Set up request interceptor to add authentication and ensure headers match example
     this.axiosInstance.interceptors.request.use(
       async (config) => {
-        // Ensure Accept header is exactly 'application/json' (not axios default)
-        config.headers['Accept'] = 'application/json';
-        config.headers['Content-Type'] = 'application/json';
+        // Force Accept header to be exactly 'application/json' (override axios defaults)
+        // Axios may add default Accept header, so we need to explicitly override it
+        if (config.headers) {
+          // Remove any default Accept headers
+          delete config.headers['Accept'];
+          delete config.headers['accept'];
+          // Set the exact headers we want (matching the example)
+          config.headers['Accept'] = 'application/json';
+          config.headers['Content-Type'] = 'application/json';
+        }
         
         if (this.useOAuth2) {
           // Use OAuth2 Bearer token
@@ -201,14 +208,53 @@ class CoupaClient {
 
   async put(endpoint, data) {
     try {
+      // Ensure data is properly formatted - convert id to number if it exists
+      // This is a safety check in case the data comes in with id as string
+      let formattedData = data;
+      if (data && typeof data === 'object' && 'id' in data) {
+        // Force id to be a number
+        const idNum = typeof data.id === 'number' ? data.id : parseInt(String(data.id), 10);
+        if (isNaN(idNum)) {
+          logger.warn(`Warning: Contract ID could not be converted to number: ${data.id}`);
+        } else {
+          formattedData = {
+            ...data,
+            id: idNum  // Explicitly set as number
+          };
+        }
+      }
+      
+      // Final verification - ensure id is a number
+      if (formattedData && typeof formattedData === 'object' && 'id' in formattedData) {
+        if (typeof formattedData.id !== 'number') {
+          logger.error(`ERROR: Formatted data id is not a number!`, {
+            originalData: data,
+            formattedData: formattedData,
+            idType: typeof formattedData.id,
+            idValue: formattedData.id,
+          });
+          // Force conversion one more time
+          formattedData.id = parseInt(String(formattedData.id), 10);
+        }
+      }
+      
       // Log request details for debugging
       logger.debug(`Coupa PUT request:`, {
         endpoint,
         url: `${this.baseURL}${endpoint}`,
-        data: JSON.stringify(data),
+        originalData: JSON.stringify(data),
+        formattedData: JSON.stringify(formattedData),
+        idType: typeof formattedData?.id,
+        idValue: formattedData?.id,
       });
       
-      const response = await this.axiosInstance.put(endpoint, data);
+      // Make the request with explicit headers to override axios defaults
+      const response = await this.axiosInstance.put(endpoint, formattedData, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
       
       // Log successful response
       logger.debug(`Coupa PUT response:`, {
@@ -229,6 +275,7 @@ class CoupaClient {
         responseHeaders: error.response?.headers,
         responseData: error.response?.data,
         requestData: data,
+        requestHeaders: error.config?.headers,
       };
       
       // If response is HTML (like the 500 error page), log it
