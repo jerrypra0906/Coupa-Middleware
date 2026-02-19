@@ -309,12 +309,39 @@ class CoupaClient {
       });
       
       // Make the request with explicit headers to override axios defaults
-      // Set headers directly in the request config to ensure they're not overridden
+      // Use transformRequest to manually serialize JSON and ensure id is a number
       const response = await this.axiosInstance.put(endpoint, formattedData, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
+        transformRequest: [(data, headers) => {
+          // Manually serialize to ensure id is a number
+          if (data && typeof data === 'object') {
+            // Create a fresh copy to ensure no reference issues
+            const serializedData = {};
+            for (const key in data) {
+              if (key === 'id' && data[key] !== undefined) {
+                // Force id to be a number
+                serializedData[key] = Number(data[key]);
+              } else {
+                serializedData[key] = data[key];
+              }
+            }
+            // Serialize to JSON string
+            const jsonString = JSON.stringify(serializedData);
+            // Verify the serialized JSON has id as number
+            const verify = JSON.parse(jsonString);
+            if (verify.id !== undefined && typeof verify.id !== 'number') {
+              // If still a string, fix it
+              const fixed = JSON.parse(jsonString);
+              fixed.id = Number(fixed.id);
+              return JSON.stringify(fixed);
+            }
+            return jsonString;
+          }
+          return data;
+        }],
       });
       
       // Log successful response
