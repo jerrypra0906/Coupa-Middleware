@@ -326,6 +326,7 @@ class ContractHeaderStaging {
   /**
    * Find contract headers ready for Coupa update
    * Criteria: sap_oa_number IS NOT NULL AND sap_oa_number != '' AND finished_update_coupa_oa = FALSE
+   * AND ctr_id IS NOT NULL (Coupa Contract ID is required for API call)
    */
   static async findReadyForCoupaUpdate() {
     const query = `
@@ -334,8 +335,8 @@ class ContractHeaderStaging {
       WHERE sap_oa_number IS NOT NULL
         AND sap_oa_number != ''
         AND finished_update_coupa_oa = FALSE
-        AND contract_id IS NOT NULL
-      ORDER BY contract_id
+        AND ctr_id IS NOT NULL
+      ORDER BY ctr_id
     `;
 
     try {

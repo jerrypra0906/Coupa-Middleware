@@ -35,12 +35,14 @@ async function execute(config) {
 
     // Update Contract Headers in Coupa using PUT API
     for (const header of contractHeadersReadyForCoupa) {
-      const contractId = header.contract_id;
+      // Use ctr_id (Coupa Contract ID) for the API call, not contract_id (Contract Number)
+      const coupaContractId = header.ctr_id;  // This is the actual Coupa Contract ID (INTEGER)
+      const contractId = header.contract_id;  // This is the Contract Number (VARCHAR) - used for database operations
       const sapOaNumber = header.sap_oa_number;
 
-      if (!contractId || !sapOaNumber) {
+      if (!coupaContractId || !sapOaNumber) {
         logger.warn(
-          `Skipping contract header with missing contractId or sap_oa_number (contractId=${contractId}, sap_oa_number=${sapOaNumber})`
+          `Skipping contract header with missing ctr_id (Coupa Contract ID) or sap_oa_number (ctr_id=${coupaContractId}, contract_id=${contractId}, sap_oa_number=${sapOaNumber})`
         );
         continue;
       }
@@ -48,30 +50,29 @@ async function execute(config) {
       try {
         // Build request body to match exact format from example:
         // { "id": number, "custom-fields": { "sap-oa": string }, "status": "published" }
-        // Contract ID comes from database as VARCHAR, so it's a string - convert to number
-        // Use Number() for more reliable conversion, then validate it's actually a number
+        // ctr_id comes from database as INTEGER, but ensure it's a number
         let contractIdNum;
-        if (typeof contractId === 'number') {
-          contractIdNum = contractId;
-        } else if (typeof contractId === 'string') {
-          contractIdNum = Number(contractId);
+        if (typeof coupaContractId === 'number') {
+          contractIdNum = coupaContractId;
+        } else if (typeof coupaContractId === 'string') {
+          contractIdNum = Number(coupaContractId);
           // Validate the conversion worked
           if (isNaN(contractIdNum) || !isFinite(contractIdNum)) {
-            throw new Error(`Invalid contract ID: ${contractId} (cannot convert to number)`);
+            throw new Error(`Invalid Coupa Contract ID (ctr_id): ${coupaContractId} (cannot convert to number)`);
           }
         } else {
-          throw new Error(`Invalid contract ID type: ${typeof contractId}`);
+          throw new Error(`Invalid Coupa Contract ID (ctr_id) type: ${typeof coupaContractId}`);
         }
         
         // Double-check it's a number
         if (typeof contractIdNum !== 'number' || isNaN(contractIdNum)) {
-          throw new Error(`Contract ID conversion failed: ${contractId} -> ${contractIdNum}`);
+          throw new Error(`Coupa Contract ID conversion failed: ${coupaContractId} -> ${contractIdNum}`);
         }
         
         // Create request body - ensure id is explicitly a number
         // Create a new object to avoid any reference issues
         const requestBody = {
-          id: contractIdNum,  // Explicitly a number
+          id: contractIdNum,  // Explicitly a number - this is the Coupa Contract ID
           'custom-fields': {
             'sap-oa': String(sapOaNumber),
           },
@@ -90,8 +91,8 @@ async function execute(config) {
         // Verify parsed id is a number (not string)
         if (typeof parsedCheck.id !== 'number') {
           logger.error(`ERROR: Request body id is being serialized as ${typeof parsedCheck.id}!`, {
-            contractId,
-            contractIdType: typeof contractId,
+            coupaContractId,
+            coupaContractIdType: typeof coupaContractId,
             contractIdNum,
             contractIdNumType: typeof contractIdNum,
             requestBody,
@@ -102,8 +103,9 @@ async function execute(config) {
         }
         
         logger.info(`Updating Coupa contract header:`, {
+          coupaContractId,
+          coupaContractIdType: typeof coupaContractId,
           contractId,
-          contractIdType: typeof contractId,
           contractIdNum,
           contractIdNumType: typeof contractIdNum,
           requestBodyId: requestBody.id,
@@ -111,26 +113,28 @@ async function execute(config) {
           requestBodyJson: requestBodyJson,
           parsedId: parsedCheck.id,
           parsedIdType: typeof parsedCheck.id,
-          endpoint: `/api/contracts/${contractId}`,
+          endpoint: `/api/contracts/${contractIdNum}`,
         });
 
         // PUT API call to Coupa
-        // URL: https://kpn-test.coupahost.com/api/contracts/{contract_id}
+        // URL: https://kpn-test.coupahost.com/api/contracts/{ctr_id}
+        // Use ctr_id (Coupa Contract ID) in the URL, not contract_id (Contract Number)
         await CoupaClient.put(
-          `/api/contracts/${encodeURIComponent(contractId)}`,
+          `/api/contracts/${encodeURIComponent(contractIdNum)}`,
           requestBody
         );
 
-        // Mark as finished updating Coupa
+        // Mark as finished updating Coupa - use contract_id (Contract Number) for database operations
         await ContractHeaderStaging.markFinishedCoupaUpdate(contractId);
 
         successCount += 1;
         totalRecords += 1;
-        logger.info(`Successfully updated Coupa contract header Contract ID=${contractId} with SAP OA=${sapOaNumber}`);
+        logger.info(`Successfully updated Coupa contract header (ctr_id=${coupaContractId}, contract_id=${contractId}) with SAP OA=${sapOaNumber}`);
       } catch (error) {
         // Extract only safe, serializable values for raw_payload
         const safeRawPayload = {
-          contract_id: contractId,
+          ctr_id: coupaContractId,  // Coupa Contract ID used in API call
+          contract_id: contractId,   // Contract Number (database key)
           sap_oa_number: sapOaNumber,
         };
         
@@ -165,14 +169,14 @@ async function execute(config) {
         
         // Log error with safe details (avoid passing error object directly)
         logger.error(
-          `Failed to update Coupa contract header for Contract ID=${contractId}: ${errorDetails.message}`,
+          `Failed to update Coupa contract header (ctr_id=${coupaContractId}, contract_id=${contractId}): ${errorDetails.message}`,
           errorDetails
         );
         
         errors.push({
           line_number: null,
           field_name: 'COUPA_CONTRACT_HEADER',
-          error_message: `Failed to update contract header ID=${contractId}: ${error.message || 'Unknown error'}`,
+          error_message: `Failed to update contract header (ctr_id=${coupaContractId}, contract_id=${contractId}): ${error.message || 'Unknown error'}`,
           raw_payload: safeRawPayload,
         });
       }
