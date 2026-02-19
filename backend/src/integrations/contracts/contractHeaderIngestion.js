@@ -176,22 +176,38 @@ async function execute(config) {
             throw new Error('Missing contract ID (Contract Number)');
           }
 
-          // Check if CTR_NUM already exists - if so, set UPD_SAPOA = 'Y'
-          if (stagingData.ctr_num) {
-            try {
-              const exists = await ContractHeaderStaging.existsByCtrNum(stagingData.ctr_num);
-              if (exists) {
-                // CTR_NUM exists, this is an update - set UPD_SAPOA = 'Y'
-                stagingData.upd_sapoa = 'Y';
-                logger.debug(`CTR_NUM ${stagingData.ctr_num} exists, setting UPD_SAPOA = 'Y'`);
+          // If parent_number is not blank, create a new record with unique contract_id
+          // and set UPD_SAPOA = 'true' and CRT_SAPOA = 'false'
+          if (stagingData.parent_number && stagingData.parent_number.trim() !== '') {
+            // Create unique contract_id by combining contract_number and parent_number
+            const uniqueContractId = `${stagingData.contract_id}-${stagingData.parent_number.trim()}`;
+            stagingData.contract_id = uniqueContractId;
+            stagingData.upd_sapoa = 'true';
+            stagingData.crt_sapoa = 'false';
+            logger.info(`Parent number present (${stagingData.parent_number}), creating new record with contract_id=${uniqueContractId}, setting UPD_SAPOA=true, CRT_SAPOA=false`);
+            
+            // Use insertFromCsv to always create a new record (no update on conflict)
+            await ContractHeaderStaging.insertFromCsv(stagingData);
+          } else {
+            // Normal flow: Check if CTR_NUM already exists - if so, set UPD_SAPOA = 'Y'
+            if (stagingData.ctr_num) {
+              try {
+                const exists = await ContractHeaderStaging.existsByCtrNum(stagingData.ctr_num);
+                if (exists) {
+                  // CTR_NUM exists, this is an update - set UPD_SAPOA = 'Y'
+                  stagingData.upd_sapoa = 'Y';
+                  logger.debug(`CTR_NUM ${stagingData.ctr_num} exists, setting UPD_SAPOA = 'Y'`);
+                }
+              } catch (checkError) {
+                // Log but don't fail the record ingestion
+                logger.warn(`Failed to check if CTR_NUM exists for ${stagingData.ctr_num}:`, checkError);
               }
-            } catch (checkError) {
-              // Log but don't fail the record ingestion
-              logger.warn(`Failed to check if CTR_NUM exists for ${stagingData.ctr_num}:`, checkError);
             }
-          }
 
-          await ContractHeaderStaging.upsertFromCsv(stagingData);
+            // Use upsertFromCsv for normal updates
+            await ContractHeaderStaging.upsertFromCsv(stagingData);
+          }
+          
           successCount += 1;
           fileSuccessCount += 1;
         } catch (error) {

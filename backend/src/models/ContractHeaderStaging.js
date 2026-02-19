@@ -180,6 +180,100 @@ class ContractHeaderStaging {
     }
   }
 
+  /**
+   * Insert a new contract header record (always creates new, no update on conflict)
+   * Used when parent_number is present to create separate records for contract amendments
+   */
+  static async insertFromCsv(data) {
+    const {
+      contract_id,
+      contract_number,
+      parent_number = null,
+      status = 'NEW',
+      ready_to_create_sap_oa = false,
+      ready_to_update_sap_oa = false,
+      finished_update_sap_oa = false,
+      sap_oa_number = null,
+      // CSV-mapped fields
+      ebeln = null,
+      ctr_name = null,
+      ctr_num = null,
+      ctr_id = null,
+      ctr_type = null,
+      ctr_stat = null,
+      own_login = null,
+      comm_name = null,
+      ctr_cdat = null,
+      lifnr = null,
+      lfa1_name1 = null,
+      ekgrp = null,
+      kdatb = null,
+      ekorg = null,
+      kdate = null,
+      ctr_clog = null,
+      waers = null,
+      zterm = null,
+      inco1 = null,
+      ktwrt = null,
+      ctr_updt = null,
+      ekpo_pstyp = null,
+      bukrs = null,
+      crt_sapoa = null,
+      upd_sapoa = null,
+      amd_ctr_ty = null,
+      ctrpa_id = null,
+      ctrpa_name = null,
+      ctrpa_num = null,
+    } = data;
+
+    // Map crt_sapoa and upd_sapoa strings to boolean flags
+    const readyToCreate = ready_to_create_sap_oa || (crt_sapoa && crt_sapoa.toLowerCase() === 'yes');
+    const readyToUpdate = ready_to_update_sap_oa || (upd_sapoa && upd_sapoa.toLowerCase() === 'yes');
+
+    const query = `
+      INSERT INTO contract_header_staging (
+        contract_id, contract_number, parent_number, status,
+        ready_to_create_sap_oa, ready_to_update_sap_oa, finished_update_sap_oa,
+        sap_oa_number,
+        ebeln, ctr_name, ctr_num, ctr_id, ctr_type, ctr_stat, own_login, comm_name,
+        ctr_cdat, lifnr, lfa1_name1, ekgrp, kdatb, ekorg, kdate, ctr_clog,
+        waers, zterm, inco1, ktwrt, ctr_updt, ekpo_pstyp, bukrs,
+        crt_sapoa, upd_sapoa, amd_ctr_ty, ctrpa_id, ctrpa_name, ctrpa_num,
+        created_at, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21, $22, $23, $24,
+        $25, $26, $27, $28, $29, $30, $31,
+        $32, $33, $34, $35, $36, $37,
+        NOW(), NOW()
+      )
+      RETURNING *
+    `;
+
+    try {
+      const result = await pool.query(query, [
+        contract_id,
+        contract_number,
+        parent_number,
+        status,
+        readyToCreate,
+        readyToUpdate,
+        finished_update_sap_oa,
+        sap_oa_number,
+        ebeln, ctr_name, ctr_num, ctr_id, ctr_type, ctr_stat, own_login, comm_name,
+        ctr_cdat, lifnr, lfa1_name1, ekgrp, kdatb, ekorg, kdate, ctr_clog,
+        waers, zterm, inco1, ktwrt, ctr_updt, ekpo_pstyp, bukrs,
+        crt_sapoa, upd_sapoa, amd_ctr_ty, ctrpa_id, ctrpa_name, ctrpa_num,
+      ]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error inserting contract header staging record from CSV:', error);
+      throw error;
+    }
+  }
+
   static async findReadyToCreate() {
     const query = `
       SELECT *

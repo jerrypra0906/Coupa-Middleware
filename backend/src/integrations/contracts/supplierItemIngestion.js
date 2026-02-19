@@ -331,11 +331,34 @@ async function execute(config) {
               
               if (contractHeader) {
                 // CTR_ID exists in contract_header_staging
-                // Update both tables' CRT_SAPOA to 'Y', leave UPD_SAPOA blank
-                const crtSapoa = 'Y';
-                const updSapoa = null; // Keep blank
+                // Check if sap_oa_number is blank or not
+                const sapOaNumber = contractHeader.sap_oa_number;
+                // Check if blank: null, undefined, empty string, or whitespace-only string
+                const isSapOaNumberBlank = !sapOaNumber || 
+                  (typeof sapOaNumber === 'string' && sapOaNumber.trim() === '');
+                
+                let crtSapoa;
+                let updSapoa;
+                
+                if (isSapOaNumberBlank) {
+                  // sap_oa_number is blank: set CRT_SAPOA = "true" and UPD_SAPOA = "false"
+                  crtSapoa = 'true';
+                  updSapoa = 'false';
+                  logger.info(
+                    `CTR_ID=${stagingData.ctr_id} found, sap_oa_number is blank. Setting CRT_SAPOA=true, UPD_SAPOA=false ` +
+                    `(contract_id=${stagingData.contract_id}, csin=${stagingData.csin})`
+                  );
+                } else {
+                  // sap_oa_number is not blank: set UPD_SAPOA = "true" and CRT_SAPOA = "false"
+                  crtSapoa = 'false';
+                  updSapoa = 'true';
+                  logger.info(
+                    `CTR_ID=${stagingData.ctr_id} found, sap_oa_number=${sapOaNumber} is not blank. Setting UPD_SAPOA=true, CRT_SAPOA=false ` +
+                    `(contract_id=${stagingData.contract_id}, csin=${stagingData.csin})`
+                  );
+                }
 
-                // Update supplier_item_staging
+                // Update supplier_item_staging flags
                 await SupplierItemStaging.updateSapOaFlags(
                   stagingData.contract_id,
                   stagingData.csin,
@@ -343,16 +366,9 @@ async function execute(config) {
                   updSapoa
                 );
 
-                // Update contract_header_staging
-                await ContractHeaderStaging.updateSapOaFlags(
-                  contractHeader.contract_id,
-                  crtSapoa,
-                  updSapoa
-                );
-
                 logger.info(
-                  `Updated CRT_SAPOA to 'Y' for CTR_ID=${stagingData.ctr_id} ` +
-                  `(contract_id=${stagingData.contract_id}, csin=${stagingData.csin})`
+                  `Updated SAP OA flags for CTR_ID=${stagingData.ctr_id} ` +
+                  `(contract_id=${stagingData.contract_id}, csin=${stagingData.csin}): CRT_SAPOA=${crtSapoa}, UPD_SAPOA=${updSapoa}`
                 );
               } else {
                 logger.debug(
