@@ -49,12 +49,27 @@ async function execute(config) {
         // Build request body to match exact format from example:
         // { "id": number, "custom-fields": { "sap-oa": string }, "status": "published" }
         // Contract ID comes from database as VARCHAR, so it's a string - convert to number
-        const contractIdNum = parseInt(String(contractId), 10);
-        if (isNaN(contractIdNum)) {
-          throw new Error(`Invalid contract ID: ${contractId} (cannot convert to number)`);
+        // Use Number() for more reliable conversion, then validate it's actually a number
+        let contractIdNum;
+        if (typeof contractId === 'number') {
+          contractIdNum = contractId;
+        } else if (typeof contractId === 'string') {
+          contractIdNum = Number(contractId);
+          // Validate the conversion worked
+          if (isNaN(contractIdNum) || !isFinite(contractIdNum)) {
+            throw new Error(`Invalid contract ID: ${contractId} (cannot convert to number)`);
+          }
+        } else {
+          throw new Error(`Invalid contract ID type: ${typeof contractId}`);
+        }
+        
+        // Double-check it's a number
+        if (typeof contractIdNum !== 'number' || isNaN(contractIdNum)) {
+          throw new Error(`Contract ID conversion failed: ${contractId} -> ${contractIdNum}`);
         }
         
         // Create request body - ensure id is explicitly a number
+        // Create a new object to avoid any reference issues
         const requestBody = {
           id: contractIdNum,  // Explicitly a number
           'custom-fields': {
@@ -64,13 +79,27 @@ async function execute(config) {
         };
 
         // Verify id is a number before sending
-        if (typeof requestBody.id !== 'number') {
+        if (typeof requestBody.id !== 'number' || isNaN(requestBody.id)) {
           throw new Error(`Contract ID must be a number, got: ${typeof requestBody.id} (${requestBody.id})`);
         }
 
-        // Log the request for debugging - verify the JSON serialization
+        // Verify JSON serialization maintains number type
         const requestBodyJson = JSON.stringify(requestBody);
         const parsedCheck = JSON.parse(requestBodyJson);
+        
+        // Verify parsed id is a number (not string)
+        if (typeof parsedCheck.id !== 'number') {
+          logger.error(`ERROR: Request body id is being serialized as ${typeof parsedCheck.id}!`, {
+            contractId,
+            contractIdType: typeof contractId,
+            contractIdNum,
+            contractIdNumType: typeof contractIdNum,
+            requestBody,
+            requestBodyJson,
+            parsedCheck,
+          });
+          throw new Error(`Request body id is being serialized as ${typeof parsedCheck.id} instead of number`);
+        }
         
         logger.info(`Updating Coupa contract header:`, {
           contractId,
@@ -84,16 +113,6 @@ async function execute(config) {
           parsedIdType: typeof parsedCheck.id,
           endpoint: `/api/contracts/${contractId}`,
         });
-        
-        // Verify parsed id is a number (not string)
-        if (typeof parsedCheck.id === 'string') {
-          logger.error(`ERROR: Request body id is being serialized as string!`, {
-            requestBody,
-            requestBodyJson,
-            parsedCheck,
-          });
-          throw new Error(`Request body id is being serialized as string instead of number`);
-        }
 
         // PUT API call to Coupa
         // URL: https://kpn-test.coupahost.com/api/contracts/{contract_id}

@@ -41,11 +41,24 @@ class CoupaClient {
         // Force Accept header to be exactly 'application/json' (override axios defaults)
         // Axios may add default Accept header, so we need to explicitly override it
         if (config.headers) {
-          // Remove any default Accept headers
-          delete config.headers['Accept'];
-          delete config.headers['accept'];
+          // Remove any default Accept headers (case-insensitive)
+          const headerKeys = Object.keys(config.headers);
+          headerKeys.forEach(key => {
+            if (key.toLowerCase() === 'accept') {
+              delete config.headers[key];
+            }
+          });
+          
           // Set the exact headers we want (matching the example)
-          config.headers['Accept'] = 'application/json';
+          // Use Object.defineProperty to ensure it's not overridden
+          Object.defineProperty(config.headers, 'Accept', {
+            value: 'application/json',
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+          
+          // Also ensure Content-Type is set
           config.headers['Content-Type'] = 'application/json';
         }
         
@@ -209,19 +222,31 @@ class CoupaClient {
   async put(endpoint, data) {
     try {
       // Ensure data is properly formatted - convert id to number if it exists
-      // This is a safety check in case the data comes in with id as string
-      let formattedData = data;
-      if (data && typeof data === 'object' && 'id' in data) {
-        // Force id to be a number
-        const idNum = typeof data.id === 'number' ? data.id : parseInt(String(data.id), 10);
-        if (isNaN(idNum)) {
-          logger.warn(`Warning: Contract ID could not be converted to number: ${data.id}`);
-        } else {
-          formattedData = {
-            ...data,
-            id: idNum  // Explicitly set as number
-          };
+      // Create a new object to avoid any reference issues
+      let formattedData = {};
+      
+      if (data && typeof data === 'object') {
+        // Copy all properties except id
+        Object.keys(data).forEach(key => {
+          if (key !== 'id') {
+            formattedData[key] = data[key];
+          }
+        });
+        
+        // Explicitly set id as a number
+        if ('id' in data) {
+          const idNum = typeof data.id === 'number' 
+            ? data.id 
+            : parseInt(String(data.id), 10);
+          
+          if (isNaN(idNum)) {
+            throw new Error(`Invalid contract ID: ${data.id} (cannot convert to number)`);
+          }
+          
+          formattedData.id = idNum;  // Explicitly set as number
         }
+      } else {
+        formattedData = data;
       }
       
       // Final verification - ensure id is a number
@@ -233,9 +258,20 @@ class CoupaClient {
             idType: typeof formattedData.id,
             idValue: formattedData.id,
           });
-          // Force conversion one more time
-          formattedData.id = parseInt(String(formattedData.id), 10);
+          throw new Error(`Contract ID must be a number, got ${typeof formattedData.id}: ${formattedData.id}`);
         }
+      }
+      
+      // Verify JSON serialization maintains number type
+      const testJson = JSON.stringify(formattedData);
+      const testParsed = JSON.parse(testJson);
+      if (formattedData.id !== undefined && typeof testParsed.id === 'string') {
+        logger.error(`ERROR: JSON serialization converted id to string!`, {
+          original: formattedData,
+          jsonString: testJson,
+          parsed: testParsed,
+        });
+        throw new Error('JSON serialization is converting id to string');
       }
       
       // Log request details for debugging
@@ -246,9 +282,12 @@ class CoupaClient {
         formattedData: JSON.stringify(formattedData),
         idType: typeof formattedData?.id,
         idValue: formattedData?.id,
+        jsonString: testJson,
+        parsedIdType: typeof testParsed?.id,
       });
       
       // Make the request with explicit headers to override axios defaults
+      // Set headers directly in the request config to ensure they're not overridden
       const response = await this.axiosInstance.put(endpoint, formattedData, {
         headers: {
           'Accept': 'application/json',
