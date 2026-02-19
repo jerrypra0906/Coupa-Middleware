@@ -456,43 +456,94 @@ class CoupaClient {
         hasStringId: jsonPayload.includes('"id":"'),
       });
       
-      // Use axios with the JSON string directly, and override transformRequest completely
-      // to ensure the string is sent as-is without any modification
-      const response = await this.axiosInstance.put(
-        endpoint,
-        jsonPayload, // Pass JSON string directly
-        {
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          // Completely override transformRequest to prevent axios from modifying our JSON string
-          transformRequest: [(data) => {
-            // If data is a string (our JSON string), verify and return as-is
-            if (typeof data === 'string') {
-              // Final check - ensure id is a number
-              if (data.includes('"id":"')) {
-                logger.error(`CRITICAL: transformRequest sees string id! Fixing...`);
-                const fixed = data.replace(/"id":"(\d+)"/g, '"id":$1');
-                logger.info(`transformRequest fixed: ${fixed}`);
-                return fixed;
-              }
-              return data; // Return string as-is
-            }
-            // For any other type, let axios handle it (shouldn't happen)
-            return data;
-          }],
-        }
-      );
+      // Use native https module to send request directly - bypass axios completely
+      // This gives us 100% control over the exact bytes sent
+      const https = require('https');
+      const url = new URL(endpoint, this.baseURL);
       
-      // Log successful response
-      logger.debug(`Coupa PUT response:`, {
-        endpoint,
-        status: response.status,
-        statusText: response.statusText,
+      // Get the token
+      let token = '';
+      if (this.useOAuth2) {
+        const CoupaTokenService = require('../services/coupa/coupaTokenService');
+        token = `Bearer ${await CoupaTokenService.getAccessToken()}`;
+      } else if (this.apiKey) {
+        // For API key, we'd need to set a custom header
+        throw new Error('API key authentication not supported with native https module');
+      }
+      
+      // Final verification - ensure id is a number in the JSON string
+      if (jsonPayload.includes('"id":"')) {
+        logger.error(`CRITICAL: Final check - JSON string still has id as string! Fixing...`);
+        jsonPayload = jsonPayload.replace(/"id":"(\d+)"/g, '"id":$1');
+        logger.info(`Final fix applied: ${jsonPayload}`);
+      }
+      
+      const options = {
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: url.pathname + url.search,
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': token,
+          'Content-Length': Buffer.byteLength(jsonPayload),
+        },
+      };
+      
+      logger.info(`Sending PUT request via native https:`, {
+        url: url.toString(),
+        jsonPayload,
+        idInPayload: JSON.parse(jsonPayload).id,
+        idType: typeof JSON.parse(jsonPayload).id,
       });
       
-      return response.data;
+      return new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          let responseData = '';
+          
+          res.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                const parsed = responseData ? JSON.parse(responseData) : {};
+                logger.info(`Coupa PUT successful:`, {
+                  status: res.statusCode,
+                  response: parsed,
+                });
+                resolve(parsed);
+              } catch (e) {
+                logger.warn(`Could not parse Coupa response as JSON: ${responseData}`);
+                resolve(responseData);
+              }
+            } else {
+              const error = new Error(`Request failed with status code ${res.statusCode}`);
+              error.status = res.statusCode;
+              error.statusText = res.statusMessage;
+              error.responseData = responseData;
+              logger.error(`Coupa PUT failed:`, {
+                status: res.statusCode,
+                statusText: res.statusMessage,
+                responseData: responseData.substring(0, 500),
+                requestPayload: jsonPayload,
+              });
+              reject(error);
+            }
+          });
+        });
+        
+        req.on('error', (error) => {
+          logger.error(`Native https request error:`, error);
+          reject(error);
+        });
+        
+        // Write the JSON payload directly - this is the exact bytes sent
+        req.write(jsonPayload);
+        req.end();
+      });
     } catch (error) {
       // Enhanced error logging
       const errorDetails = {
