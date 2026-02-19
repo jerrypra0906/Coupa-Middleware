@@ -296,52 +296,57 @@ class CoupaClient {
         };
       }
       
+      // Manually serialize JSON string to ensure id is definitely a number
+      // This bypasses axios's automatic serialization which might convert it to string
+      let jsonPayload;
+      if (formattedData && typeof formattedData === 'object') {
+        // Create a completely fresh object with id as explicit number
+        const finalData = {};
+        for (const key in formattedData) {
+          if (key === 'id' && formattedData[key] !== undefined) {
+            // Force id to be a number - use parseInt to ensure it's an integer
+            finalData[key] = parseInt(String(formattedData[key]), 10);
+            if (isNaN(finalData[key])) {
+              throw new Error(`Invalid contract ID: ${formattedData[key]}`);
+            }
+          } else {
+            finalData[key] = formattedData[key];
+          }
+        }
+        // Serialize to JSON string - this ensures id is a number in the JSON
+        jsonPayload = JSON.stringify(finalData);
+        
+        // Final verification - parse it back and check
+        const verify = JSON.parse(jsonPayload);
+        if (verify.id !== undefined && typeof verify.id !== 'number') {
+          // If somehow still a string, recreate the JSON with explicit number
+          verify.id = parseInt(String(verify.id), 10);
+          jsonPayload = JSON.stringify(verify);
+        }
+      } else {
+        jsonPayload = JSON.stringify(formattedData);
+      }
+      
       // Log request details for debugging
       logger.debug(`Coupa PUT request:`, {
         endpoint,
         url: `${this.baseURL}${endpoint}`,
         originalData: JSON.stringify(data),
         formattedData: JSON.stringify(formattedData),
+        jsonPayload: jsonPayload,
         idType: typeof formattedData?.id,
         idValue: formattedData?.id,
-        jsonString: testJson,
-        parsedIdType: typeof testParsed?.id,
+        parsedPayload: JSON.parse(jsonPayload),
+        parsedIdType: typeof JSON.parse(jsonPayload)?.id,
       });
       
       // Make the request with explicit headers to override axios defaults
-      // Use transformRequest to manually serialize JSON and ensure id is a number
-      const response = await this.axiosInstance.put(endpoint, formattedData, {
+      // Pass the JSON string directly to bypass axios's automatic serialization
+      const response = await this.axiosInstance.put(endpoint, jsonPayload, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
-        transformRequest: [(data, headers) => {
-          // Manually serialize to ensure id is a number
-          if (data && typeof data === 'object') {
-            // Create a fresh copy to ensure no reference issues
-            const serializedData = {};
-            for (const key in data) {
-              if (key === 'id' && data[key] !== undefined) {
-                // Force id to be a number
-                serializedData[key] = Number(data[key]);
-              } else {
-                serializedData[key] = data[key];
-              }
-            }
-            // Serialize to JSON string
-            const jsonString = JSON.stringify(serializedData);
-            // Verify the serialized JSON has id as number
-            const verify = JSON.parse(jsonString);
-            if (verify.id !== undefined && typeof verify.id !== 'number') {
-              // If still a string, fix it
-              const fixed = JSON.parse(jsonString);
-              fixed.id = Number(fixed.id);
-              return JSON.stringify(fixed);
-            }
-            return jsonString;
-          }
-          return data;
-        }],
       });
       
       // Log successful response
