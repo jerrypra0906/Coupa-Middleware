@@ -32,17 +32,47 @@ async function execute(config) {
     }
 
     logger.info(`Found ${contractHeadersReadyForCoupa.length} contract headers ready for Coupa update`);
+    
+    // Debug: Log all headers to see what data we have
+    logger.info(`Debug - Contract headers data:`, {
+      headers: contractHeadersReadyForCoupa.map(h => ({
+        contract_id: h.contract_id,
+        ctr_id: h.ctr_id,
+        ctr_id_type: typeof h.ctr_id,
+        ctr_num: h.ctr_num,
+        sap_oa_number: h.sap_oa_number,
+      })),
+    });
 
     // Update Contract Headers in Coupa using PUT API
     for (const header of contractHeadersReadyForCoupa) {
       // Use ctr_id (Coupa Contract ID) for the API call, not contract_id (Contract Number)
-      const coupaContractId = header.ctr_id;  // This is the actual Coupa Contract ID (INTEGER)
+      let coupaContractId = header.ctr_id;  // This is the actual Coupa Contract ID (INTEGER)
       const contractId = header.contract_id;  // This is the Contract Number (VARCHAR) - used for database operations
+      const contractNumber = header.ctr_num || header.contract_number;  // Contract Number from CSV
       const sapOaNumber = header.sap_oa_number;
+
+      // If ctr_id is missing, try to GET the contract from Coupa to find its actual ID
+      if (!coupaContractId && contractNumber) {
+        logger.warn(
+          `ctr_id is missing for contract_id=${contractId}, contract_number=${contractNumber}. Attempting to find contract in Coupa...`
+        );
+        try {
+          // Try to GET contract by contract number - Coupa API might support this
+          // If not, we'll need to search or use a different approach
+          const searchResult = await CoupaClient.get(`/api/contracts?contract_number=${encodeURIComponent(contractNumber)}`);
+          if (searchResult && searchResult.length > 0 && searchResult[0].id) {
+            coupaContractId = searchResult[0].id;
+            logger.info(`Found Coupa Contract ID ${coupaContractId} for contract_number=${contractNumber}`);
+          }
+        } catch (error) {
+          logger.warn(`Could not retrieve contract from Coupa for contract_number=${contractNumber}:`, error.message);
+        }
+      }
 
       if (!coupaContractId || !sapOaNumber) {
         logger.warn(
-          `Skipping contract header with missing ctr_id (Coupa Contract ID) or sap_oa_number (ctr_id=${coupaContractId}, contract_id=${contractId}, sap_oa_number=${sapOaNumber})`
+          `Skipping contract header with missing ctr_id (Coupa Contract ID) or sap_oa_number (ctr_id=${coupaContractId}, contract_id=${contractId}, contract_number=${contractNumber}, sap_oa_number=${sapOaNumber})`
         );
         continue;
       }
@@ -103,9 +133,10 @@ async function execute(config) {
         }
         
         logger.info(`Updating Coupa contract header:`, {
-          coupaContractId,
-          coupaContractIdType: typeof coupaContractId,
-          contractId,
+          ctr_id: coupaContractId,
+          ctr_idType: typeof coupaContractId,
+          contract_id: contractId,
+          contract_idType: typeof contractId,
           contractIdNum,
           contractIdNumType: typeof contractIdNum,
           requestBodyId: requestBody.id,
@@ -114,6 +145,7 @@ async function execute(config) {
           parsedId: parsedCheck.id,
           parsedIdType: typeof parsedCheck.id,
           endpoint: `/api/contracts/${contractIdNum}`,
+          fullHeader: header, // Debug: show all header fields
         });
 
         // PUT API call to Coupa
