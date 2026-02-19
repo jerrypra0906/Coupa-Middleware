@@ -41,8 +41,16 @@ class CoupaClient {
     // Set up request interceptor to add authentication and ensure headers match example
     this.axiosInstance.interceptors.request.use(
       async (config) => {
-        // CRITICAL: Fix data to ensure id is a number before axios processes it
-        if (config.data) {
+        // CRITICAL: Log the exact data being sent for PUT requests to /api/contracts
+        if (config.method === 'put' && config.url && config.url.includes('/api/contracts')) {
+          logger.info(`REQUEST INTERCEPTOR - PUT to /api/contracts:`, {
+            dataType: typeof config.data,
+            isString: typeof config.data === 'string',
+            isBuffer: Buffer.isBuffer(config.data),
+            dataPreview: typeof config.data === 'string' ? config.data.substring(0, 200) : String(config.data).substring(0, 200),
+            hasStringId: typeof config.data === 'string' ? config.data.includes('"id":"') : false,
+          });
+          
           // If data is a string (JSON string), check and fix it
           if (typeof config.data === 'string') {
             // Check if id is a string in the JSON
