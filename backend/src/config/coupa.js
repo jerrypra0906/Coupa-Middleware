@@ -528,14 +528,36 @@ class CoupaClient {
                 resolve(responseData);
               }
             } else {
+              // Create error object that matches axios error structure for compatibility
               const error = new Error(`Request failed with status code ${res.statusCode}`);
               error.status = res.statusCode;
               error.statusText = res.statusMessage;
               error.responseData = responseData;
+              
+              // Parse response data if it's JSON
+              let parsedResponseData = responseData;
+              try {
+                if (responseData && responseData.trim().startsWith('{')) {
+                  parsedResponseData = JSON.parse(responseData);
+                }
+              } catch (e) {
+                // Not JSON, keep as string
+              }
+              
+              // Create axios-like error structure for compatibility with existing error handlers
+              error.response = {
+                status: res.statusCode,
+                statusText: res.statusMessage,
+                data: parsedResponseData,
+                headers: res.headers,
+              };
+              
               logger.error(`Coupa PUT failed:`, {
                 status: res.statusCode,
                 statusText: res.statusMessage,
-                responseData: responseData.substring(0, 500),
+                responseData: typeof parsedResponseData === 'string' 
+                  ? parsedResponseData.substring(0, 500) 
+                  : parsedResponseData,
                 requestPayload: jsonPayload,
               });
               reject(error);
