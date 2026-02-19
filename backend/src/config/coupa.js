@@ -1,4 +1,6 @@
 const axios = require('axios');
+const https = require('https');
+const { URL } = require('url');
 const path = require('path');
 const fs = require('fs');
 
@@ -445,29 +447,110 @@ class CoupaClient {
         logger.info(`Final manual fix applied: ${jsonPayload}`);
       }
       
-      // Parse the JSON string back to object to pass to axios
-      // This allows the instance-level transformRequest to handle serialization properly
-      let requestData;
-      try {
-        requestData = JSON.parse(jsonPayload);
-        // Ensure id is definitely a number
-        if (requestData.id !== undefined) {
-          requestData.id = parseInt(String(requestData.id), 10);
-          if (isNaN(requestData.id)) {
-            throw new Error(`Invalid id value: ${requestData.id}`);
+      // Use native https module to send request directly, bypassing axios completely
+      // This gives us full control over the JSON serialization
+      return new Promise(async (resolve, reject) => {
+        const url = new URL(endpoint, this.baseURL);
+        
+        // Get the token directly from CoupaTokenService
+        let token = '';
+        if (this.useOAuth2) {
+          try {
+            const CoupaTokenService = require('../services/coupa/coupaTokenService');
+            const accessToken = await CoupaTokenService.getAccessToken();
+            token = `Bearer ${accessToken}`;
+          } catch (e) {
+            logger.error(`Failed to get OAuth2 token: ${e.message}`);
+            reject(e);
+            return;
+          }
+        } else if (this.apiKey) {
+          // For API key, we'd need to set a custom header, but let's use axios for that case
+          // For now, just use axios for non-OAuth2
+          logger.warn('Using axios for non-OAuth2 requests');
+          try {
+            const requestData = JSON.parse(jsonPayload);
+            const response = await this.axiosInstance.put(endpoint, requestData, {
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+            });
+            resolve(response.data);
+            return;
+          } catch (error) {
+            reject(error);
+            return;
           }
         }
-      } catch (e) {
-        logger.error(`Error parsing jsonPayload: ${e.message}`, { jsonPayload });
-        throw e;
-      }
-      
-      // Make the request - pass object directly, let instance-level transformRequest handle serialization
-      const response = await this.axiosInstance.put(endpoint, requestData, {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
+        
+        // Final verification of JSON string - ensure id is a number
+        if (jsonPayload.includes('"id":"')) {
+          logger.error(`CRITICAL: Final check - JSON string still has id as string! Fixing...`);
+          jsonPayload = jsonPayload.replace(/"id":"(\d+)"/g, '"id":$1');
+          logger.info(`Final fix applied: ${jsonPayload}`);
+        }
+        
+        const options = {
+          hostname: url.hostname,
+          port: url.port || 443,
+          path: url.pathname + url.search,
+          method: 'PUT',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': token || '',
+            'Content-Length': Buffer.byteLength(jsonPayload),
+          },
+        };
+        
+        logger.debug(`Sending PUT request via native https:`, {
+          url: url.toString(),
+          jsonPayload,
+          payloadSize: jsonPayload.length,
+          idInPayload: JSON.parse(jsonPayload).id,
+          idType: typeof JSON.parse(jsonPayload).id,
+        });
+        
+        const req = https.request(options, (res) => {
+          let responseData = '';
+          
+          res.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                const parsed = responseData ? JSON.parse(responseData) : {};
+                resolve(parsed);
+              } catch (e) {
+                resolve(responseData);
+              }
+            } else {
+              const error = new Error(`Request failed with status code ${res.statusCode}`);
+              error.status = res.statusCode;
+              error.statusText = res.statusMessage;
+              error.responseData = responseData;
+              logger.error(`Error putting data to Coupa ${endpoint}:`, {
+                status: res.statusCode,
+                statusText: res.statusMessage,
+                responseData: responseData.substring(0, 500), // Limit response data in logs
+                jsonPayload: jsonPayload.substring(0, 200), // Limit payload in logs
+              });
+              reject(error);
+            }
+          });
+        });
+        
+        req.on('error', (error) => {
+          logger.error(`Request error for ${endpoint}:`, error);
+          reject(error);
+        });
+        
+        // Write the JSON payload directly
+        req.write(jsonPayload);
+        req.end();
       });
       
       // Log successful response
