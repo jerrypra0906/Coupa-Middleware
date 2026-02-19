@@ -27,7 +27,7 @@ class CoupaClient {
     // Determine authentication method - OAuth2 takes precedence if credentials are provided
     this.useOAuth2 = !!(process.env.COUPA_OAUTH_CLIENT_ID && process.env.COUPA_OAUTH_CLIENT_SECRET);
     
-    // Initialize axios instance with transformRequest to ensure id is always a number
+    // Initialize axios instance - we'll handle serialization in the put method
     this.axiosInstance = axios.create({
       baseURL: this.baseURL,
       timeout: 30000,
@@ -35,31 +35,7 @@ class CoupaClient {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       },
-      transformRequest: [(data, headers) => {
-        // If data is a string (JSON string), ensure id is a number
-        if (typeof data === 'string') {
-          if (data.includes('"id":"')) {
-            logger.error(`CRITICAL: Instance transformRequest sees id as string! Fixing...`);
-            const fixed = data.replace(/"id":"(\d+)"/g, '"id":$1');
-            logger.info(`Instance transformRequest fixed: ${fixed}`);
-            return fixed;
-          }
-          return data;
-        }
-        // If data is an object, serialize with id as number
-        if (data && typeof data === 'object' && !Buffer.isBuffer(data)) {
-          return JSON.stringify(data, (key, value) => {
-            if (key === 'id' && value !== undefined && value !== null) {
-              const numValue = parseInt(String(value), 10);
-              if (!isNaN(numValue) && isFinite(numValue)) {
-                return numValue;
-              }
-            }
-            return value;
-          });
-        }
-        return data;
-      }],
+      // Don't set transformRequest at instance level - handle it per-request
     });
 
     // Set up request interceptor to add authentication and ensure headers match example
@@ -447,111 +423,59 @@ class CoupaClient {
         logger.info(`Final manual fix applied: ${jsonPayload}`);
       }
       
-      // Use native https module to send request directly, bypassing axios completely
-      // This gives us full control over the JSON serialization
-      return new Promise(async (resolve, reject) => {
-        const url = new URL(endpoint, this.baseURL);
+      // Final verification of JSON string - ensure id is a number
+      if (jsonPayload.includes('"id":"')) {
+        logger.error(`CRITICAL: Final check - JSON string still has id as string! Fixing...`);
+        jsonPayload = jsonPayload.replace(/"id":"(\d+)"/g, '"id":$1');
+        logger.info(`Final fix applied: ${jsonPayload}`);
         
-        // Get the token directly from CoupaTokenService
-        let token = '';
-        if (this.useOAuth2) {
-          try {
-            const CoupaTokenService = require('../services/coupa/coupaTokenService');
-            const accessToken = await CoupaTokenService.getAccessToken();
-            token = `Bearer ${accessToken}`;
-          } catch (e) {
-            logger.error(`Failed to get OAuth2 token: ${e.message}`);
-            reject(e);
-            return;
-          }
-        } else if (this.apiKey) {
-          // For API key, we'd need to set a custom header, but let's use axios for that case
-          // For now, just use axios for non-OAuth2
-          logger.warn('Using axios for non-OAuth2 requests');
-          try {
-            const requestData = JSON.parse(jsonPayload);
-            const response = await this.axiosInstance.put(endpoint, requestData, {
-              headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-              },
-            });
-            resolve(response.data);
-            return;
-          } catch (error) {
-            reject(error);
-            return;
-          }
+        // Verify the fix worked
+        const verify = JSON.parse(jsonPayload);
+        if (typeof verify.id !== 'number') {
+          logger.error(`CRITICAL: After regex fix, id is still ${typeof verify.id}! Forcing fix...`);
+          verify.id = parseInt(String(verify.id), 10);
+          jsonPayload = JSON.stringify(verify);
+          logger.info(`Forced fix applied: ${jsonPayload}`);
         }
-        
-        // Final verification of JSON string - ensure id is a number
-        if (jsonPayload.includes('"id":"')) {
-          logger.error(`CRITICAL: Final check - JSON string still has id as string! Fixing...`);
-          jsonPayload = jsonPayload.replace(/"id":"(\d+)"/g, '"id":$1');
-          logger.info(`Final fix applied: ${jsonPayload}`);
-        }
-        
-        const options = {
-          hostname: url.hostname,
-          port: url.port || 443,
-          path: url.pathname + url.search,
-          method: 'PUT',
+      }
+      
+      // Log the exact payload we're about to send
+      logger.info(`FINAL PAYLOAD TO SEND:`, {
+        jsonPayload,
+        parsed: JSON.parse(jsonPayload),
+        idType: typeof JSON.parse(jsonPayload).id,
+        idValue: JSON.parse(jsonPayload).id,
+        hasStringId: jsonPayload.includes('"id":"'),
+      });
+      
+      // Use axios with the JSON string directly, and override transformRequest completely
+      // to ensure the string is sent as-is without any modification
+      const response = await this.axiosInstance.put(
+        endpoint,
+        jsonPayload, // Pass JSON string directly
+        {
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'Authorization': token || '',
-            'Content-Length': Buffer.byteLength(jsonPayload),
           },
-        };
-        
-        logger.debug(`Sending PUT request via native https:`, {
-          url: url.toString(),
-          jsonPayload,
-          payloadSize: jsonPayload.length,
-          idInPayload: JSON.parse(jsonPayload).id,
-          idType: typeof JSON.parse(jsonPayload).id,
-        });
-        
-        const req = https.request(options, (res) => {
-          let responseData = '';
-          
-          res.on('data', (chunk) => {
-            responseData += chunk;
-          });
-          
-          res.on('end', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              try {
-                const parsed = responseData ? JSON.parse(responseData) : {};
-                resolve(parsed);
-              } catch (e) {
-                resolve(responseData);
+          // Completely override transformRequest to prevent axios from modifying our JSON string
+          transformRequest: [(data) => {
+            // If data is a string (our JSON string), verify and return as-is
+            if (typeof data === 'string') {
+              // Final check - ensure id is a number
+              if (data.includes('"id":"')) {
+                logger.error(`CRITICAL: transformRequest sees string id! Fixing...`);
+                const fixed = data.replace(/"id":"(\d+)"/g, '"id":$1');
+                logger.info(`transformRequest fixed: ${fixed}`);
+                return fixed;
               }
-            } else {
-              const error = new Error(`Request failed with status code ${res.statusCode}`);
-              error.status = res.statusCode;
-              error.statusText = res.statusMessage;
-              error.responseData = responseData;
-              logger.error(`Error putting data to Coupa ${endpoint}:`, {
-                status: res.statusCode,
-                statusText: res.statusMessage,
-                responseData: responseData.substring(0, 500), // Limit response data in logs
-                jsonPayload: jsonPayload.substring(0, 200), // Limit payload in logs
-              });
-              reject(error);
+              return data; // Return string as-is
             }
-          });
-        });
-        
-        req.on('error', (error) => {
-          logger.error(`Request error for ${endpoint}:`, error);
-          reject(error);
-        });
-        
-        // Write the JSON payload directly
-        req.write(jsonPayload);
-        req.end();
-      });
+            // For any other type, let axios handle it (shouldn't happen)
+            return data;
+          }],
+        }
+      );
       
       // Log successful response
       logger.debug(`Coupa PUT response:`, {
