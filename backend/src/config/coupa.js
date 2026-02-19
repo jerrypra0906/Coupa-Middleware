@@ -50,7 +50,13 @@ class CoupaClient {
           });
           
           // Set the exact headers we want (matching the example)
-          config.headers['Accept'] = 'application/json';
+          // Use Object.defineProperty to ensure it can't be overridden
+          Object.defineProperty(config.headers, 'Accept', {
+            value: 'application/json',
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
           config.headers['Content-Type'] = 'application/json';
         }
         
@@ -214,28 +220,44 @@ class CoupaClient {
   async put(endpoint, data) {
     try {
       // Ensure data is properly formatted - convert id to number if it exists
-      // Create a new object to avoid any reference issues
-      let formattedData = {};
+      // Create a completely new object to avoid any reference issues
+      let formattedData;
       
-      if (data && typeof data === 'object') {
-        // Copy all properties except id
-        Object.keys(data).forEach(key => {
-          if (key !== 'id') {
-            formattedData[key] = data[key];
-          }
-        });
-        
-        // Explicitly set id as a number
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        // Convert id to number if it exists
+        let idNum = null;
         if ('id' in data) {
-          const idNum = typeof data.id === 'number' 
-            ? data.id 
-            : parseInt(String(data.id), 10);
+          if (typeof data.id === 'number') {
+            idNum = data.id;
+          } else if (typeof data.id === 'string') {
+            idNum = Number(data.id);
+          } else {
+            idNum = Number(String(data.id));
+          }
           
-          if (isNaN(idNum)) {
+          if (isNaN(idNum) || !isFinite(idNum)) {
             throw new Error(`Invalid contract ID: ${data.id} (cannot convert to number)`);
           }
           
-          formattedData.id = idNum;  // Explicitly set as number
+          // Ensure it's definitely a number (not a string representation)
+          idNum = Number(idNum);
+        }
+        
+        // Create a completely fresh object with all properties
+        formattedData = {};
+        for (const key in data) {
+          if (key === 'id') {
+            // Explicitly set id as a number
+            formattedData.id = idNum;
+          } else {
+            // Copy other properties as-is
+            formattedData[key] = data[key];
+          }
+        }
+        
+        // If id was in the original data, ensure it's set as a number
+        if ('id' in data && idNum !== null) {
+          formattedData.id = idNum;
         }
       } else {
         formattedData = data;
@@ -254,16 +276,24 @@ class CoupaClient {
         }
       }
       
-      // Verify JSON serialization maintains number type
+      // Verify JSON serialization maintains number type BEFORE sending
       const testJson = JSON.stringify(formattedData);
       const testParsed = JSON.parse(testJson);
-      if (formattedData.id !== undefined && typeof testParsed.id === 'string') {
-        logger.error(`ERROR: JSON serialization converted id to string!`, {
+      if (formattedData.id !== undefined && typeof testParsed.id !== 'number') {
+        logger.error(`ERROR: JSON serialization converted id to ${typeof testParsed.id}!`, {
           original: formattedData,
+          originalIdType: typeof formattedData.id,
+          originalIdValue: formattedData.id,
           jsonString: testJson,
           parsed: testParsed,
+          parsedIdType: typeof testParsed.id,
+          parsedIdValue: testParsed.id,
         });
-        throw new Error('JSON serialization is converting id to string');
+        // Force fix it by creating a new object with explicit number
+        formattedData = {
+          ...formattedData,
+          id: Number(formattedData.id),
+        };
       }
       
       // Log request details for debugging
