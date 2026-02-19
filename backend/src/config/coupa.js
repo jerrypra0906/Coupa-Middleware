@@ -267,6 +267,14 @@ class CoupaClient {
   }
 
   async put(endpoint, data) {
+    logger.info(`PUT METHOD CALLED - Starting native https implementation:`, {
+      endpoint,
+      dataType: typeof data,
+      data: JSON.stringify(data),
+      hasId: data && typeof data === 'object' && 'id' in data,
+      idType: data && typeof data === 'object' && 'id' in data ? typeof data.id : 'N/A',
+      idValue: data && typeof data === 'object' && 'id' in data ? data.id : 'N/A',
+    });
     try {
       // Ensure data is properly formatted - convert id to number if it exists
       // Create a completely new object to avoid any reference issues
