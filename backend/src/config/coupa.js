@@ -313,15 +313,34 @@ class CoupaClient {
             finalData[key] = formattedData[key];
           }
         }
-        // Serialize to JSON string - this ensures id is a number in the JSON
-        jsonPayload = JSON.stringify(finalData);
+        // Serialize to JSON string using replacer to FORCE id to be a number
+        jsonPayload = JSON.stringify(finalData, (key, value) => {
+          if (key === 'id' && value !== undefined && value !== null) {
+            // Force id to be a number - parse and return as number
+            const numValue = parseInt(String(value), 10);
+            if (!isNaN(numValue) && isFinite(numValue)) {
+              return numValue; // Return as number type
+            }
+            throw new Error(`Invalid id value: ${value}`);
+          }
+          return value; // Return other values as-is
+        });
         
         // Final verification - parse it back and check
         const verify = JSON.parse(jsonPayload);
         if (verify.id !== undefined && typeof verify.id !== 'number') {
-          // If somehow still a string, recreate the JSON with explicit number
-          verify.id = parseInt(String(verify.id), 10);
-          jsonPayload = JSON.stringify(verify);
+          logger.error(`CRITICAL: JSON still has id as ${typeof verify.id} after replacer!`, {
+            jsonPayload,
+            verify,
+            verifyIdType: typeof verify.id,
+            verifyIdValue: verify.id,
+            finalDataIdType: typeof finalData.id,
+            finalDataIdValue: finalData.id,
+          });
+          // Force fix by manually constructing the JSON string with id as number
+          const fixedData = { ...verify };
+          fixedData.id = parseInt(String(verify.id), 10);
+          jsonPayload = JSON.stringify(fixedData);
         }
       } else {
         jsonPayload = JSON.stringify(formattedData);
@@ -339,6 +358,15 @@ class CoupaClient {
         parsedPayload: JSON.parse(jsonPayload),
         parsedIdType: typeof JSON.parse(jsonPayload)?.id,
       });
+      
+      // Final check: Verify the JSON string itself has id as number (not string)
+      // Check the raw JSON string for "id":"232" vs "id":232
+      if (jsonPayload.includes('"id":"')) {
+        logger.error(`CRITICAL: JSON string has id as string! Raw JSON: ${jsonPayload}`);
+        // Manually fix the JSON string by replacing "id":"232" with "id":232
+        jsonPayload = jsonPayload.replace(/"id":"(\d+)"/g, '"id":$1');
+        logger.info(`Fixed JSON string: ${jsonPayload}`);
+      }
       
       // Make the request with explicit headers to override axios defaults
       // Pass the JSON string directly to bypass axios's automatic serialization
