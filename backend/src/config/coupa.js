@@ -368,13 +368,66 @@ class CoupaClient {
         logger.info(`Fixed JSON string: ${jsonPayload}`);
       }
       
+      // Verify one more time after regex fix
+      const finalCheck = JSON.parse(jsonPayload);
+      if (typeof finalCheck.id !== 'number') {
+        logger.error(`CRITICAL: After all fixes, id is still ${typeof finalCheck.id}!`, {
+          jsonPayload,
+          finalCheck,
+          finalCheckIdType: typeof finalCheck.id,
+        });
+        // Last resort: manually construct the JSON string
+        finalCheck.id = parseInt(String(finalCheck.id), 10);
+        jsonPayload = JSON.stringify(finalCheck);
+        logger.info(`Final manual fix applied: ${jsonPayload}`);
+      }
+      
       // Make the request with explicit headers to override axios defaults
-      // Pass the JSON string directly to bypass axios's automatic serialization
+      // Override transformRequest completely to ensure our JSON string is sent as-is
       const response = await this.axiosInstance.put(endpoint, jsonPayload, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
+        // Completely override transformRequest to prevent axios from modifying our JSON string
+        transformRequest: [(data, headers) => {
+          // If data is already a string (our pre-serialized JSON), verify and return as-is
+          if (typeof data === 'string') {
+            // Final check: ensure id is a number in the string
+            let finalData = data;
+            if (data.includes('"id":"')) {
+              logger.error(`CRITICAL: transformRequest sees id as string! Raw: ${data}`);
+              // Fix it with regex
+              finalData = data.replace(/"id":"(\d+)"/g, '"id":$1');
+              logger.info(`transformRequest fixed to: ${finalData}`);
+              
+              // Verify the fix worked
+              try {
+                const verify = JSON.parse(finalData);
+                if (typeof verify.id !== 'number') {
+                  logger.error(`CRITICAL: After regex fix, id is still ${typeof verify.id}!`);
+                  // Force fix by reconstructing
+                  verify.id = parseInt(String(verify.id), 10);
+                  finalData = JSON.stringify(verify);
+                  logger.info(`Final forced fix: ${finalData}`);
+                }
+              } catch (e) {
+                logger.error(`Error parsing fixed JSON: ${e.message}`);
+              }
+            }
+            return finalData;
+          }
+          // If data is an object (shouldn't happen, but handle it), serialize with id as number
+          if (data && typeof data === 'object') {
+            return JSON.stringify(data, (key, value) => {
+              if (key === 'id' && value !== undefined && value !== null) {
+                return parseInt(String(value), 10);
+              }
+              return value;
+            });
+          }
+          return data;
+        }],
       });
       
       // Log successful response
