@@ -25,7 +25,7 @@ class CoupaClient {
     // Determine authentication method - OAuth2 takes precedence if credentials are provided
     this.useOAuth2 = !!(process.env.COUPA_OAUTH_CLIENT_ID && process.env.COUPA_OAUTH_CLIENT_SECRET);
     
-    // Initialize axios instance
+    // Initialize axios instance with transformRequest to ensure id is always a number
     this.axiosInstance = axios.create({
       baseURL: this.baseURL,
       timeout: 30000,
@@ -33,11 +33,74 @@ class CoupaClient {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       },
+      transformRequest: [(data, headers) => {
+        // If data is a string (JSON string), ensure id is a number
+        if (typeof data === 'string') {
+          if (data.includes('"id":"')) {
+            logger.error(`CRITICAL: Instance transformRequest sees id as string! Fixing...`);
+            const fixed = data.replace(/"id":"(\d+)"/g, '"id":$1');
+            logger.info(`Instance transformRequest fixed: ${fixed}`);
+            return fixed;
+          }
+          return data;
+        }
+        // If data is an object, serialize with id as number
+        if (data && typeof data === 'object' && !Buffer.isBuffer(data)) {
+          return JSON.stringify(data, (key, value) => {
+            if (key === 'id' && value !== undefined && value !== null) {
+              const numValue = parseInt(String(value), 10);
+              if (!isNaN(numValue) && isFinite(numValue)) {
+                return numValue;
+              }
+            }
+            return value;
+          });
+        }
+        return data;
+      }],
     });
 
     // Set up request interceptor to add authentication and ensure headers match example
     this.axiosInstance.interceptors.request.use(
       async (config) => {
+        // CRITICAL: Fix data to ensure id is a number before axios processes it
+        if (config.data) {
+          // If data is a string (JSON string), check and fix it
+          if (typeof config.data === 'string') {
+            // Check if id is a string in the JSON
+            if (config.data.includes('"id":"')) {
+              logger.error(`CRITICAL: Request interceptor sees id as string! Fixing... Raw: ${config.data}`);
+              // Fix it with regex
+              config.data = config.data.replace(/"id":"(\d+)"/g, '"id":$1');
+              logger.info(`Request interceptor fixed to: ${config.data}`);
+              
+              // Verify the fix
+              try {
+                const verify = JSON.parse(config.data);
+                if (typeof verify.id !== 'number') {
+                  logger.error(`CRITICAL: After regex fix in interceptor, id is still ${typeof verify.id}!`);
+                  verify.id = parseInt(String(verify.id), 10);
+                  config.data = JSON.stringify(verify);
+                  logger.info(`Request interceptor forced fix: ${config.data}`);
+                }
+              } catch (e) {
+                logger.error(`Error parsing data in interceptor: ${e.message}`);
+              }
+            }
+          } 
+          // If data is an object, ensure id is a number
+          else if (config.data && typeof config.data === 'object' && !Buffer.isBuffer(config.data)) {
+            if ('id' in config.data && typeof config.data.id !== 'number') {
+              logger.error(`CRITICAL: Request interceptor sees id as ${typeof config.data.id}! Fixing...`);
+              config.data.id = parseInt(String(config.data.id), 10);
+              if (isNaN(config.data.id)) {
+                throw new Error(`Invalid id value: ${config.data.id}`);
+              }
+              logger.info(`Request interceptor fixed object id to: ${config.data.id} (type: ${typeof config.data.id})`);
+            }
+          }
+        }
+        
         // Force Accept header to be exactly 'application/json' (override axios defaults)
         // Axios may add default Accept header, so we need to explicitly override it
         if (config.headers) {
@@ -382,52 +445,29 @@ class CoupaClient {
         logger.info(`Final manual fix applied: ${jsonPayload}`);
       }
       
-      // Make the request with explicit headers to override axios defaults
-      // Override transformRequest completely to ensure our JSON string is sent as-is
-      const response = await this.axiosInstance.put(endpoint, jsonPayload, {
+      // Parse the JSON string back to object to pass to axios
+      // This allows the instance-level transformRequest to handle serialization properly
+      let requestData;
+      try {
+        requestData = JSON.parse(jsonPayload);
+        // Ensure id is definitely a number
+        if (requestData.id !== undefined) {
+          requestData.id = parseInt(String(requestData.id), 10);
+          if (isNaN(requestData.id)) {
+            throw new Error(`Invalid id value: ${requestData.id}`);
+          }
+        }
+      } catch (e) {
+        logger.error(`Error parsing jsonPayload: ${e.message}`, { jsonPayload });
+        throw e;
+      }
+      
+      // Make the request - pass object directly, let instance-level transformRequest handle serialization
+      const response = await this.axiosInstance.put(endpoint, requestData, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
-        // Completely override transformRequest to prevent axios from modifying our JSON string
-        transformRequest: [(data, headers) => {
-          // If data is already a string (our pre-serialized JSON), verify and return as-is
-          if (typeof data === 'string') {
-            // Final check: ensure id is a number in the string
-            let finalData = data;
-            if (data.includes('"id":"')) {
-              logger.error(`CRITICAL: transformRequest sees id as string! Raw: ${data}`);
-              // Fix it with regex
-              finalData = data.replace(/"id":"(\d+)"/g, '"id":$1');
-              logger.info(`transformRequest fixed to: ${finalData}`);
-              
-              // Verify the fix worked
-              try {
-                const verify = JSON.parse(finalData);
-                if (typeof verify.id !== 'number') {
-                  logger.error(`CRITICAL: After regex fix, id is still ${typeof verify.id}!`);
-                  // Force fix by reconstructing
-                  verify.id = parseInt(String(verify.id), 10);
-                  finalData = JSON.stringify(verify);
-                  logger.info(`Final forced fix: ${finalData}`);
-                }
-              } catch (e) {
-                logger.error(`Error parsing fixed JSON: ${e.message}`);
-              }
-            }
-            return finalData;
-          }
-          // If data is an object (shouldn't happen, but handle it), serialize with id as number
-          if (data && typeof data === 'object') {
-            return JSON.stringify(data, (key, value) => {
-              if (key === 'id' && value !== undefined && value !== null) {
-                return parseInt(String(value), 10);
-              }
-              return value;
-            });
-          }
-          return data;
-        }],
       });
       
       // Log successful response
