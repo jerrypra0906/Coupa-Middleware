@@ -227,17 +227,26 @@ class SupplierItemStaging {
 
   /**
    * Find supplier items ready for Coupa update
-   * Criteria: sap_oa_line IS NOT NULL AND sap_oa_line != '' AND finished_update_coupa_oa = FALSE
+   * Criteria: 
+   * - sap_oa_line IS NOT NULL AND sap_oa_line != ''
+   * - finished_update_coupa_oa = FALSE
+   * - csin IS NOT NULL
+   * - Contract header must have been successfully updated in Coupa (finished_update_coupa_oa = TRUE)
+   * - created_at or updated_at must be within 5 minutes of current time
    */
   static async findReadyForCoupaUpdate() {
     const query = `
-      SELECT *
-      FROM supplier_item_staging
-      WHERE sap_oa_line IS NOT NULL
-        AND sap_oa_line != ''
-        AND finished_update_coupa_oa = FALSE
-        AND csin IS NOT NULL
-      ORDER BY contract_id, csin
+      SELECT si.*
+      FROM supplier_item_staging si
+      INNER JOIN contract_header_staging chs ON si.contract_id = chs.contract_id
+      WHERE si.sap_oa_line IS NOT NULL
+        AND si.sap_oa_line != ''
+        AND si.finished_update_coupa_oa = FALSE
+        AND si.csin IS NOT NULL
+        AND chs.finished_update_coupa_oa = TRUE
+        AND (si.created_at >= NOW() - INTERVAL '5 minutes' 
+             OR si.updated_at >= NOW() - INTERVAL '5 minutes')
+      ORDER BY si.contract_id, si.csin
     `;
 
     try {
@@ -266,6 +275,46 @@ class SupplierItemStaging {
       return result.rows[0];
     } catch (error) {
       logger.error('Error marking supplier item as finished Coupa update:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reset finished_update_coupa_oa flag to allow re-processing
+   * Useful when items need to be re-sent to Coupa
+   */
+  static async resetFinishedCoupaUpdate(contractId, csin = null) {
+    let query;
+    let params;
+
+    if (csin) {
+      // Reset specific item
+      query = `
+        UPDATE supplier_item_staging
+        SET finished_update_coupa_oa = FALSE,
+            updated_at = NOW()
+        WHERE contract_id = $1 AND csin = $2
+        RETURNING *
+      `;
+      params = [contractId, csin];
+    } else {
+      // Reset all items for a contract
+      query = `
+        UPDATE supplier_item_staging
+        SET finished_update_coupa_oa = FALSE,
+            updated_at = NOW()
+        WHERE contract_id = $1
+        RETURNING *
+      `;
+      params = [contractId];
+    }
+
+    try {
+      const result = await pool.query(query, params);
+      logger.info(`Reset finished_update_coupa_oa flag for ${result.rows.length} supplier item(s) (contract_id=${contractId}${csin ? `, csin=${csin}` : ''})`);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error resetting finished_update_coupa_oa flag:', error);
       throw error;
     }
   }

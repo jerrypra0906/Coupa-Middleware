@@ -1,6 +1,7 @@
 const CoupaClient = require('../../config/coupa');
 const SupplierItemStaging = require('../../models/SupplierItemStaging');
 const logger = require('../../config/logger');
+const pool = require('../../config/database');
 
 /**
  * Supplier Item to Coupa integration.
@@ -17,12 +18,97 @@ async function execute(config) {
   try {
     logger.info('Starting supplier item to Coupa integration...');
 
+    // Debug: Check what supplier items exist for contract_id = 146 or ctr_id = 146
+    const debugQuery = `
+      SELECT 
+        si.contract_id,
+        si.csin,
+        si.sap_oa_line,
+        si.finished_update_coupa_oa,
+        si.created_at,
+        si.updated_at,
+        NOW() as current_time,
+        NOW() - INTERVAL '5 minutes' as five_minutes_ago,
+        (si.created_at >= NOW() - INTERVAL '5 minutes') as created_within_5min,
+        (si.updated_at >= NOW() - INTERVAL '5 minutes') as updated_within_5min,
+        chs.finished_update_coupa_oa as header_finished_update_coupa_oa,
+        chs.ctr_id
+      FROM supplier_item_staging si
+      LEFT JOIN contract_header_staging chs ON si.contract_id = chs.contract_id
+      WHERE si.contract_id = '146' OR chs.ctr_id = 146
+      ORDER BY si.contract_id, si.csin
+    `;
+    
+    try {
+      const debugResult = await pool.query(debugQuery);
+      logger.info(`Debug - Supplier items for contract_id=146:`, {
+        count: debugResult.rows.length,
+        items: debugResult.rows.map(row => ({
+          contract_id: row.contract_id,
+          csin: row.csin,
+          sap_oa_line: row.sap_oa_line,
+          finished_update_coupa_oa: row.finished_update_coupa_oa,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          current_time: row.current_time,
+          five_minutes_ago: row.five_minutes_ago,
+          created_within_5min: row.created_within_5min,
+          updated_within_5min: row.updated_within_5min,
+          header_finished_update_coupa_oa: row.header_finished_update_coupa_oa,
+          ctr_id: row.ctr_id,
+        })),
+      });
+    } catch (debugError) {
+      logger.warn('Debug query failed:', debugError.message);
+    }
+
     // Fetch supplier items ready for Coupa update
     // Criteria: finished_update_sap_oa = TRUE AND finished_update_coupa_oa = FALSE
     const supplierItemsReadyForCoupa = await SupplierItemStaging.findReadyForCoupaUpdate();
 
     if (!supplierItemsReadyForCoupa || supplierItemsReadyForCoupa.length === 0) {
       logger.info('No supplier items ready for Coupa update');
+      
+      // Additional debug: Check why items for contract_id=146 or ctr_id=146 are not being selected
+      // Remove the finished_update_coupa_oa = FALSE filter to see ALL items
+      const whyNotQuery = `
+        SELECT 
+          si.contract_id,
+          si.csin,
+          chs.ctr_id,
+          si.finished_update_coupa_oa,
+          CASE WHEN si.sap_oa_line IS NULL THEN 'sap_oa_line IS NULL' 
+               WHEN si.sap_oa_line = '' THEN 'sap_oa_line IS EMPTY'
+               ELSE 'OK' END as sap_oa_line_check,
+          CASE WHEN si.finished_update_coupa_oa = TRUE THEN 'ALREADY FINISHED - THIS IS WHY NOT SELECTED' ELSE 'OK' END as finished_check,
+          CASE WHEN si.csin IS NULL THEN 'CSIN IS NULL' ELSE 'OK' END as csin_check,
+          CASE WHEN chs.finished_update_coupa_oa IS NULL THEN 'HEADER NOT FOUND'
+               WHEN chs.finished_update_coupa_oa = FALSE THEN 'HEADER NOT FINISHED'
+               ELSE 'OK' END as header_check,
+          CASE WHEN si.created_at < NOW() - INTERVAL '5 minutes' AND si.updated_at < NOW() - INTERVAL '5 minutes' 
+               THEN 'TIMESTAMP TOO OLD (>5min)' ELSE 'OK' END as timestamp_check,
+          si.created_at,
+          si.updated_at,
+          NOW() - INTERVAL '5 minutes' as five_minutes_ago
+        FROM supplier_item_staging si
+        LEFT JOIN contract_header_staging chs ON si.contract_id = chs.contract_id
+        WHERE (si.contract_id = '146' OR chs.ctr_id = 146)
+          AND si.sap_oa_line IS NOT NULL
+          AND si.sap_oa_line != ''
+          AND si.csin IS NOT NULL
+      `;
+      
+      try {
+        const whyNotResult = await pool.query(whyNotQuery);
+        if (whyNotResult.rows.length > 0) {
+          logger.info(`Debug - Why items for contract_id=146 are not selected:`, {
+            items: whyNotResult.rows,
+          });
+        }
+      } catch (whyNotError) {
+        logger.warn('Why not query failed:', whyNotError.message);
+      }
+      
       return {
         successCount: 0,
         errorCount: 0,
@@ -32,6 +118,10 @@ async function execute(config) {
     }
 
     logger.info(`Found ${supplierItemsReadyForCoupa.length} supplier items ready for Coupa update`);
+    
+    // Log which contract_ids are being processed
+    const contractIds = [...new Set(supplierItemsReadyForCoupa.map(item => item.contract_id))];
+    logger.info(`Processing supplier items for contracts: ${contractIds.join(', ')}`);
 
     // Update Supplier Items in Coupa using PUT API
     for (const item of supplierItemsReadyForCoupa) {

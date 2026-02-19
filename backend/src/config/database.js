@@ -41,9 +41,15 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
-// Test connection
-pool.on('connect', () => {
+// Set timezone to Asia/Jakarta (GMT+7) for all database connections
+pool.on('connect', async (client) => {
   console.log('Database connected successfully');
+  // Set timezone to Asia/Jakarta (GMT+7) for this connection
+  try {
+    await client.query("SET timezone = 'Asia/Jakarta'");
+  } catch (err) {
+    console.error('Error setting timezone:', err);
+  }
 });
 
 pool.on('error', (err) => {

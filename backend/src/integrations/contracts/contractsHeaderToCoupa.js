@@ -46,27 +46,74 @@ async function execute(config) {
 
     // Update Contract Headers in Coupa using PUT API
     for (const header of contractHeadersReadyForCoupa) {
-      // Use ctr_id (Coupa Contract ID) for the API call, not contract_id (Contract Number)
+      // CRITICAL: Use ctr_id (Coupa Contract ID) for the API call, not contract_id (Contract Number)
+      // Log the raw header data first to see what we're working with
+      logger.info(`🔍 Processing header - Raw data:`, {
+        contract_id: header.contract_id,
+        ctr_id: header.ctr_id,
+        ctr_id_type: typeof header.ctr_id,
+        ctr_num: header.ctr_num,
+        contract_number: header.contract_number,
+        sap_oa_number: header.sap_oa_number,
+      });
+      
       let coupaContractId = header.ctr_id;  // This is the actual Coupa Contract ID (INTEGER)
       const contractId = header.contract_id;  // This is the Contract Number (VARCHAR) - used for database operations
       const contractNumber = header.ctr_num || header.contract_number;  // Contract Number from CSV
       const sapOaNumber = header.sap_oa_number;
+      
+      logger.info(`🔍 Extracted values:`, {
+        coupaContractId,
+        coupaContractIdType: typeof coupaContractId,
+        contractId,
+        contractIdType: typeof contractId,
+        contractNumber,
+        sapOaNumber,
+      });
 
-      // If ctr_id is missing, try to GET the contract from Coupa to find its actual ID
-      if (!coupaContractId && contractNumber) {
+      // Check if ctr_id is missing or if it's the same as contract_id (which would be wrong - Contract Number vs Coupa Contract ID)
+      if (!coupaContractId || (coupaContractId && String(coupaContractId) === String(contractId))) {
         logger.warn(
-          `ctr_id is missing for contract_id=${contractId}, contract_number=${contractNumber}. Attempting to find contract in Coupa...`
+          `⚠️ WARNING: ctr_id is missing or equals contract_id (Contract Number) for contract_id=${contractId}, contract_number=${contractNumber}, ctr_id=${coupaContractId}. This suggests ctr_id is using Contract Number instead of Coupa Contract ID.`
         );
-        try {
-          // Try to GET contract by contract number - Coupa API might support this
-          // If not, we'll need to search or use a different approach
-          const searchResult = await CoupaClient.get(`/api/contracts?contract_number=${encodeURIComponent(contractNumber)}`);
-          if (searchResult && searchResult.length > 0 && searchResult[0].id) {
-            coupaContractId = searchResult[0].id;
-            logger.info(`Found Coupa Contract ID ${coupaContractId} for contract_number=${contractNumber}`);
+        
+        if (contractNumber) {
+          logger.info(`Attempting to find contract in Coupa using contract_number=${contractNumber}...`);
+          try {
+            // Try to GET contract by contract number - Coupa API might support searching
+            // Try different search patterns
+            const searchPatterns = [
+              `/api/contracts?contract_number=${encodeURIComponent(contractNumber)}`,
+              `/api/contracts?number=${encodeURIComponent(contractNumber)}`,
+              `/api/contracts?q=number:${encodeURIComponent(contractNumber)}`,
+            ];
+            
+            for (const pattern of searchPatterns) {
+              try {
+                const searchResult = await CoupaClient.get(pattern);
+                // Handle different response formats
+                const contracts = Array.isArray(searchResult) ? searchResult : (searchResult.data || []);
+                if (contracts.length > 0) {
+                  const foundContract = contracts.find(c => 
+                    c.number === contractNumber || 
+                    c.contract_number === contractNumber ||
+                    String(c.id) === String(contractNumber)
+                  ) || contracts[0];
+                  
+                  if (foundContract && foundContract.id) {
+                    coupaContractId = foundContract.id;
+                    logger.info(`✅ Found Coupa Contract ID ${coupaContractId} for contract_number=${contractNumber} (was ${header.ctr_id})`);
+                    break;
+                  }
+                }
+              } catch (e) {
+                // Try next pattern
+                continue;
+              }
+            }
+          } catch (error) {
+            logger.warn(`Could not retrieve contract from Coupa for contract_number=${contractNumber}:`, error.message);
           }
-        } catch (error) {
-          logger.warn(`Could not retrieve contract from Coupa for contract_number=${contractNumber}:`, error.message);
         }
       }
 
@@ -77,10 +124,20 @@ async function execute(config) {
         continue;
       }
 
+      // CRITICAL SAFETY CHECK: Ensure we're NOT using contract_id (Contract Number) instead of ctr_id (Coupa Contract ID)
+      if (String(coupaContractId) === String(contractId)) {
+        logger.error(
+          `❌ CRITICAL ERROR: coupaContractId (${coupaContractId}) equals contractId (${contractId})! This means we're using Contract Number instead of Coupa Contract ID. Skipping this record.`
+        );
+        continue;
+      }
+
       try {
         // Build request body to match exact format from example:
         // { "id": number, "custom-fields": { "sap-oa": string }, "status": "published" }
         // ctr_id comes from database as INTEGER, but ensure it's a number
+        logger.info(`✅ Using Coupa Contract ID: ${coupaContractId} (NOT Contract Number: ${contractId})`);
+        
         let contractIdNum;
         if (typeof coupaContractId === 'number') {
           contractIdNum = coupaContractId;
@@ -151,17 +208,87 @@ async function execute(config) {
         // PUT API call to Coupa
         // URL: https://kpn-test.coupahost.com/api/contracts/{ctr_id}
         // Use ctr_id (Coupa Contract ID) in the URL, not contract_id (Contract Number)
-        await CoupaClient.put(
-          `/api/contracts/${encodeURIComponent(contractIdNum)}`,
-          requestBody
-        );
+        let putSuccessful = false;
+        try {
+          await CoupaClient.put(
+            `/api/contracts/${encodeURIComponent(contractIdNum)}`,
+            requestBody
+          );
+          putSuccessful = true;
+        } catch (putError) {
+          // If we get a 404, the ctr_id might be wrong - try to find the contract by Contract Number
+          const is404 = putError.response?.status === 404 || putError.status === 404;
+          if (is404 && contractNumber) {
+            logger.warn(`⚠️ Contract with ctr_id=${contractIdNum} not found (404). Searching for contract using contract_number=${contractNumber}...`);
+            
+            // Try to find the contract in Coupa using Contract Number
+            const searchPatterns = [
+              `/api/contracts?contract_number=${encodeURIComponent(contractNumber)}`,
+              `/api/contracts?number=${encodeURIComponent(contractNumber)}`,
+              `/api/contracts?q=number:${encodeURIComponent(contractNumber)}`,
+            ];
+            
+            let foundCoupaContractId = null;
+            for (const pattern of searchPatterns) {
+              try {
+                const searchResult = await CoupaClient.get(pattern);
+                const contracts = Array.isArray(searchResult) ? searchResult : (searchResult.data || []);
+                if (contracts.length > 0) {
+                  const foundContract = contracts.find(c => 
+                    c.number === contractNumber || 
+                    c.contract_number === contractNumber ||
+                    String(c.number) === String(contractNumber)
+                  ) || contracts[0];
+                  
+                  if (foundContract && foundContract.id) {
+                    foundCoupaContractId = foundContract.id;
+                    logger.info(`✅ Found correct Coupa Contract ID ${foundCoupaContractId} for contract_number=${contractNumber} (was using incorrect ctr_id=${contractIdNum})`);
+                    break;
+                  }
+                }
+              } catch (e) {
+                // Try next pattern
+                continue;
+              }
+            }
+            
+            // If we found the correct contract ID, retry the PUT
+            if (foundCoupaContractId) {
+              const correctedRequestBody = {
+                id: foundCoupaContractId,
+                'custom-fields': {
+                  'sap-oa': String(sapOaNumber),
+                },
+                status: 'published',
+              };
+              
+              logger.info(`Retrying PUT with correct Coupa Contract ID ${foundCoupaContractId}...`);
+              await CoupaClient.put(
+                `/api/contracts/${encodeURIComponent(foundCoupaContractId)}`,
+                correctedRequestBody
+              );
+              putSuccessful = true;
+              // Update coupaContractId for logging
+              coupaContractId = foundCoupaContractId;
+            } else {
+              // Couldn't find the contract, re-throw the original 404 error
+              logger.error(`❌ Could not find contract in Coupa using contract_number=${contractNumber}. Original error was 404 for ctr_id=${contractIdNum}`);
+              throw putError;
+            }
+          } else {
+            // Not a 404 or no contract number to search with, re-throw the error
+            throw putError;
+          }
+        }
 
-        // Mark as finished updating Coupa - use contract_id (Contract Number) for database operations
-        await ContractHeaderStaging.markFinishedCoupaUpdate(contractId);
+        if (putSuccessful) {
+          // Mark as finished updating Coupa - use contract_id (Contract Number) for database operations
+          await ContractHeaderStaging.markFinishedCoupaUpdate(contractId);
 
-        successCount += 1;
-        totalRecords += 1;
-        logger.info(`Successfully updated Coupa contract header (ctr_id=${coupaContractId}, contract_id=${contractId}) with SAP OA=${sapOaNumber}`);
+          successCount += 1;
+          totalRecords += 1;
+          logger.info(`Successfully updated Coupa contract header (ctr_id=${coupaContractId}, contract_id=${contractId}) with SAP OA=${sapOaNumber}`);
+        }
       } catch (error) {
         // Extract only safe, serializable values for raw_payload
         const safeRawPayload = {
