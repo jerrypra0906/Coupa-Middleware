@@ -50,15 +50,7 @@ class CoupaClient {
           });
           
           // Set the exact headers we want (matching the example)
-          // Use Object.defineProperty to ensure it's not overridden
-          Object.defineProperty(config.headers, 'Accept', {
-            value: 'application/json',
-            writable: true,
-            enumerable: true,
-            configurable: true,
-          });
-          
-          // Also ensure Content-Type is set
+          config.headers['Accept'] = 'application/json';
           config.headers['Content-Type'] = 'application/json';
         }
         
