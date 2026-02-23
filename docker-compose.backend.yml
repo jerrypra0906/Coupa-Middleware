@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: admincoupa
       POSTGRES_PASSWORD: admincoupa@2025
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -62,7 +62,7 @@ services:
       SMTP_USER: ${SMTP_USER:-smtp_user}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-smtp_password}
       SMTP_FROM: ${SMTP_FROM:-noreply@coupa-middleware.com}
-      FRONTEND_URL: ${FRONTEND_URL:-http://172.28.92.56}
+      FRONTEND_URL: ${FRONTEND_URL:-http://172.28.92.56:8080}
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
       SESSION_SECRET: ${SESSION_SECRET:-dev_session_secret_change_in_production}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}

@@ -75,7 +75,7 @@ RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
 
 # Frontend URL (for CORS)
-FRONTEND_URL=http://172.28.92.56
+FRONTEND_URL=http://172.28.92.56:8080
 "@
 
 Set-Content -Path $BackendEnvPath -Value $BackendEnvContent

@@ -70,8 +70,8 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Deployment Complete!" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Frontend should be accessible at:"
-Write-Host "  - Private IP: http://172.28.92.56" -ForegroundColor Green
-Write-Host "  - Public IP: http://8.215.6.189" -ForegroundColor Green
+Write-Host "  - Private IP: http://172.28.92.56:8080" -ForegroundColor Green
+Write-Host "  - Public IP: http://8.215.6.189:8080" -ForegroundColor Green
 Write-Host ""
 Write-Host "To view logs: docker-compose -f docker-compose.frontend.yml logs -f frontend"
 Write-Host "To stop: docker-compose -f docker-compose.frontend.yml down"

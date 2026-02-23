@@ -4,20 +4,20 @@ Run these commands directly on your servers to check port availability **before*
 
 ## On Frontend Server (172.28.92.56)
 
-Check if ports 80 and 443 are available:
+Check if ports 8080 and 8443 are available:
 
 ```bash
 # Method 1: Using netstat
-netstat -tuln | grep -E ':(80|443) '
+netstat -tuln | grep -E ':(8080|8443) '
 
 # Method 2: Using ss (modern alternative)
-ss -tuln | grep -E ':(80|443) '
+ss -tuln | grep -E ':(8080|8443) '
 
 # Method 3: Using lsof
-lsof -i :80 -i :443
+lsof -i :8080 -i :8443
 
 # Method 4: Simple check (if nothing shows, ports are free)
-sudo netstat -tulpn | grep -E ':(80|443) '
+sudo netstat -tulpn | grep -E ':(8080|8443) '
 ```
 
 **Expected Result:**
@@ -26,20 +26,20 @@ sudo netstat -tulpn | grep -E ':(80|443) '
 
 ## On Backend Server (172.28.92.57)
 
-Check if ports 6001 and 5432 are available:
+Check if ports 6001 and 5433 are available:
 
 ```bash
 # Method 1: Using netstat
-netstat -tuln | grep -E ':(6001|5432) '
+netstat -tuln | grep -E ':(6001|5433) '
 
 # Method 2: Using ss
-ss -tuln | grep -E ':(6001|5432) '
+ss -tuln | grep -E ':(6001|5433) '
 
 # Method 3: Using lsof
-lsof -i :6001 -i :5432
+lsof -i :6001 -i :5433
 
 # Method 4: Simple check
-sudo netstat -tulpn | grep -E ':(6001|5432) '
+sudo netstat -tulpn | grep -E ':(6001|5433) '
 ```
 
 **Expected Result:**
@@ -51,10 +51,10 @@ sudo netstat -tulpn | grep -E ':(6001|5432) '
 Find what's using the port:
 
 ```bash
-# Find process using port 80
-sudo lsof -i :80
+# Find process using port 8080
+sudo lsof -i :8080
 # or
-sudo netstat -tulpn | grep :80
+sudo netstat -tulpn | grep :8080
 
 # Kill the process (if safe to do so)
 sudo kill -9 <PID>

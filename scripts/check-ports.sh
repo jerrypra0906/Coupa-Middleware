@@ -58,23 +58,23 @@ check_port() {
 # Check ports for Frontend Server (172.28.92.56)
 echo "FRONTEND SERVER (172.28.92.56 / 8.215.6.189)"
 echo "----------------------------------------"
-check_port 80 "HTTP (Frontend)"
-check_port 443 "HTTPS (Frontend)"
+check_port 8080 "HTTP (Frontend)"
+check_port 8443 "HTTPS (Frontend)"
 echo ""
 
 # Check ports for Backend/DB Server (172.28.92.57)
 echo "BACKEND/DB SERVER (172.28.92.57)"
 echo "----------------------------------------"
 check_port 6001 "Backend API"
-check_port 5432 "PostgreSQL Database"
+check_port 5433 "PostgreSQL Database"
 echo ""
 
 # Summary
 echo "=========================================="
 echo "Summary"
 echo "=========================================="
-echo "Frontend Server needs: 80, 443"
-echo "Backend Server needs: 6001, 5432"
+echo "Frontend Server needs: 8080, 8443"
+echo "Backend Server needs: 6001, 5433"
 echo ""
 echo "If any ports are in use, you may need to:"
 echo "1. Stop the service using that port"

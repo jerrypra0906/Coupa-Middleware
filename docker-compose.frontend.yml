@@ -8,8 +8,8 @@ services:
         REACT_APP_API_BASE_URL: http://172.28.92.57:6001/api
     container_name: coupa_frontend_testing
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
+      - "8443:443"
     restart: unless-stopped
     networks:
       - coupa_network

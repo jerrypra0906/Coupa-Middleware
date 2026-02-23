@@ -8,12 +8,12 @@ This guide provides instructions for deploying the Coupa Middleware application 
 - **Private IP**: 172.28.92.56
 - **Public IP**: 8.215.6.189
 - **Services**: Frontend (React App)
-- **Ports Required**: 80 (HTTP), 443 (HTTPS)
+- **Ports Required**: 8080 (HTTP), 8443 (HTTPS)
 
 ### Backend/DB Server
 - **Private IP**: 172.28.92.57
 - **Services**: Backend API, PostgreSQL Database
-- **Ports Required**: 6001 (Backend API), 5432 (PostgreSQL)
+- **Ports Required**: 6001 (Backend API), 5433 (PostgreSQL - mapped from container port 5432)
 
 ## Prerequisites
 
@@ -67,22 +67,22 @@ You can check ports manually using these commands:
 
 **On Frontend Server (172.28.92.56):**
 ```bash
-# Check if ports 80 and 443 are in use
-netstat -tuln | grep -E ':(80|443) '
+# Check if ports 8080 and 8443 are in use
+netstat -tuln | grep -E ':(8080|8443) '
 # or
-ss -tuln | grep -E ':(80|443) '
+ss -tuln | grep -E ':(8080|8443) '
 # or
-lsof -i :80 -i :443
+lsof -i :8080 -i :8443
 ```
 
 **On Backend Server (172.28.92.57):**
 ```bash
-# Check if ports 6001 and 5432 are in use
-netstat -tuln | grep -E ':(6001|5432) '
+# Check if ports 6001 and 5433 are in use
+netstat -tuln | grep -E ':(6001|5433) '
 # or
-ss -tuln | grep -E ':(6001|5432) '
+ss -tuln | grep -E ':(6001|5433) '
 # or
-lsof -i :6001 -i :5432
+lsof -i :6001 -i :5433
 ```
 
 **If ports are available**, you'll see no output. **If ports are in use**, you'll see the process information.
@@ -205,15 +205,15 @@ Then update the following in `backend/.env.testing`:
 
 5. **Verify frontend is accessible:**
    ```bash
-   curl http://localhost
+   curl http://localhost:8080
    # Should return HTML content
    ```
 
 ### Step 3: Verify Deployment
 
 1. **Test Frontend Access:**
-   - Private: http://172.28.92.56
-   - Public: http://8.215.6.189
+   - Private: http://172.28.92.56:8080
+   - Public: http://8.215.6.189:8080
 
 2. **Test Backend API:**
    - http://172.28.92.57:6001/health
@@ -229,13 +229,13 @@ Then update the following in `backend/.env.testing`:
 ### Frontend Configuration
 - **File**: `docker-compose.frontend.yml`
 - **API URL**: Configured to point to `http://172.28.92.57:6001/api`
-- **Ports**: 80 (HTTP), 443 (HTTPS)
+- **Ports**: 8080 (HTTP), 8443 (HTTPS)
 
 ### Backend Configuration
 - **File**: `docker-compose.backend.yml`
-- **Database**: PostgreSQL on port 5432
+- **Database**: PostgreSQL on port 5433 (host) mapped from container port 5432
 - **API Port**: 6001
-- **CORS**: Configured to allow requests from `http://172.28.92.56`
+- **CORS**: Configured to allow requests from `http://172.28.92.56:8080`
 
 ## Troubleshooting
 
@@ -275,7 +275,7 @@ If a port is already in use:
 
 3. **Check CORS configuration** in `backend/src/index.js`:
    ```javascript
-   origin: process.env.FRONTEND_URL || 'http://172.28.92.56'
+   origin: process.env.FRONTEND_URL || 'http://172.28.92.56:8080'
    ```
 
 ### Database Connection Issues

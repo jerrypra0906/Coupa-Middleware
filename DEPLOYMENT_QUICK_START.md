@@ -54,19 +54,19 @@ chmod +x scripts/deploy-frontend.sh
 
 ### 5. Verify
 
-- Frontend: http://172.28.92.56 or http://8.215.6.189
+- Frontend: http://172.28.92.56:8080 or http://8.215.6.189:8080
 - Backend Health: http://172.28.92.57:6001/health
 - Backend API: http://172.28.92.57:6001/api
 
 ## Required Ports
 
 ### Frontend Server (172.28.92.56)
-- **80** - HTTP
-- **443** - HTTPS
+- **8080** - HTTP
+- **8443** - HTTPS
 
 ### Backend Server (172.28.92.57)
 - **6001** - Backend API
-- **5432** - PostgreSQL Database
+- **5433** - PostgreSQL Database (mapped from container port 5432)
 
 ## Troubleshooting
 

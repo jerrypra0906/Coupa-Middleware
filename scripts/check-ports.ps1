@@ -28,23 +28,23 @@ function Check-Port {
 # Check ports for Frontend Server (172.28.92.56)
 Write-Host "FRONTEND SERVER (172.28.92.56 / 8.215.6.189)" -ForegroundColor Yellow
 Write-Host "----------------------------------------" -ForegroundColor Yellow
-Check-Port -Port 80 -Service "HTTP (Frontend)"
-Check-Port -Port 443 -Service "HTTPS (Frontend)"
+Check-Port -Port 8080 -Service "HTTP (Frontend)"
+Check-Port -Port 8443 -Service "HTTPS (Frontend)"
 Write-Host ""
 
 # Check ports for Backend/DB Server (172.28.92.57)
 Write-Host "BACKEND/DB SERVER (172.28.92.57)" -ForegroundColor Yellow
 Write-Host "----------------------------------------" -ForegroundColor Yellow
 Check-Port -Port 6001 -Service "Backend API"
-Check-Port -Port 5432 -Service "PostgreSQL Database"
+Check-Port -Port 5433 -Service "PostgreSQL Database"
 Write-Host ""
 
 # Summary
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Summary" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "Frontend Server needs: 80, 443"
-Write-Host "Backend Server needs: 6001, 5432"
+Write-Host "Frontend Server needs: 8080, 8443"
+Write-Host "Backend Server needs: 6001, 5433"
 Write-Host ""
 Write-Host "If any ports are in use, you may need to:" -ForegroundColor Yellow
 Write-Host "1. Stop the service using that port"
