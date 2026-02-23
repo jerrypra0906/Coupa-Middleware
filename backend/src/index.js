@@ -9,8 +9,13 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
-// Load .env.staging if NODE_ENV is staging, otherwise load .env
-const envFile = process.env.NODE_ENV === 'staging' ? '.env.staging' : '.env';
+// Load environment-specific .env file
+let envFile = '.env';
+if (process.env.NODE_ENV === 'staging') {
+  envFile = '.env.staging';
+} else if (process.env.NODE_ENV === 'testing') {
+  envFile = '.env.testing';
+}
 const envPath = path.resolve(__dirname, '../', envFile);
 
 if (fs.existsSync(envPath)) {
